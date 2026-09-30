@@ -1,5 +1,4 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
   IsByteLength,
   IsEmail,
@@ -10,13 +9,11 @@ import {
 } from 'class-validator';
 import { BCRYPT_MAX_BYTES } from '../../../common/crypto/password.util';
 import { NormalizeEmail } from '../../../common/transformers/normalize-email.transform';
-
-const trim = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim() : value;
+import { Trim } from '../../../common/transformers/trim.transform';
 
 export class CreateDriverDto {
   @ApiProperty({ example: 'Jean Mbarga' })
-  @Transform(trim)
+  @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)

@@ -43,7 +43,9 @@ describe('DriversService', () => {
       },
       mission: { count: jest.fn().mockResolvedValue(0) },
       // Verrou `SELECT … FOR UPDATE` : renvoie la ligne du chauffeur verrouillée.
-      $queryRaw: jest.fn().mockResolvedValue([{ id: DRIVER_ID }]),
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValue([{ id: DRIVER_ID, isActive: true }]),
       // Le callback reçoit le client transactionnel : ici, le même mock.
       $transaction: jest.fn(),
     };

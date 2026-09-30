@@ -107,6 +107,13 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    `{ success, data, timestamp }`), `unauthorizedResponse`/`forbiddenResponse`,
    `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests : 48 unitaires, 24 e2e.
    Réutiliser `USER_RESPONSE_SELECT` / `toUserResponse` (`src/modules/users/user.mapper.ts`).
+6. Missions (en cours) : `POST /missions` (DISPATCHER). Verrou chauffeur partagé
+   `lockDriver()` (`src/modules/drivers/driver-lock.ts`), dates métier
+   `src/common/utils/business-date.util.ts` (`businessToday()`, `YYYY-MM-DD` ↔ `@db.Date`),
+   `@Trim()`, `MISSION_RESPONSE_SELECT` / `toMissionResponse`. Codes : `DRIVER_NOT_FOUND` et
+   `DRIVER_INACTIVE` (400, chauffeur du corps), `PLANNED_DATE_IN_PAST` (400),
+   `MISSION_REFERENCE_ALREADY_USED` (409, via P2002). Reste : détail + historique, liste
+   filtrée, modification/réassignation.
 
 ### À faire, dans cet ordre (une micro-étape = code + tests + typecheck/lint/test/e2e/build + commit + push)
 
@@ -131,6 +138,9 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
   même verrou `SELECT … FOR UPDATE` que la désactivation. Référence normalisée (trim +
   majuscules), unique (`MISSION_REFERENCE_ALREADY_USED`).
 - La création écrit une entrée d'historique `null → PLANNED` (acteur = dispatcher).
+- Date prévue au format `YYYY-MM-DD`, **aujourd'hui ou plus tard** (fuseau Douala) à la
+  création et à la modification : une mission PLANNED dans le passé n'apparaîtrait jamais
+  dans « les missions du jour » du chauffeur.
 - Modification / réassignation par le dispatcher **uniquement si PLANNED** (sinon 409).
   `DELIVERED` et `FAILED` sont terminaux ; une nouvelle tentative = une nouvelle mission.
 - Seul le **chauffeur assigné** fait les transitions. Statut + horodatage + historique dans

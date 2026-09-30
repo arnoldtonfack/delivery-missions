@@ -12,6 +12,7 @@ import { toUserResponse, USER_RESPONSE_SELECT } from '../users/user.mapper';
 import type { CreateDriverDto } from './dto/create-driver.dto';
 import type { ListDriversQueryDto } from './dto/list-drivers-query.dto';
 import type { UpdateDriverDto } from './dto/update-driver.dto';
+import { lockDriver } from './driver-lock';
 
 /** Statuts qui empêchent de désactiver un chauffeur (mission à faire ou en cours). */
 const OPEN_MISSION_STATUSES: readonly MissionStatus[] = [
@@ -95,14 +96,10 @@ export class DriversService {
    */
   async setActive(id: string, isActive: boolean): Promise<UserResponseDto> {
     return this.prisma.$transaction(async (tx) => {
-      // Verrou de ligne sur le chauffeur jusqu'à la fin de la transaction : une
-      // affectation de mission concurrente (qui prend le même verrou) attend, et
-      // ne peut donc pas se glisser entre le comptage et la désactivation.
-      const locked = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "User"
-        WHERE "id" = ${id}::uuid AND "role" = 'DRIVER'
-        FOR UPDATE`;
-      if (locked.length === 0) {
+      // Une affectation de mission concurrente (qui prend le même verrou) attend,
+      // et ne peut donc pas se glisser entre le comptage et la désactivation.
+      const locked = await lockDriver(tx, id);
+      if (!locked) {
         throw new NotFoundException('DRIVER_NOT_FOUND');
       }
       if (!isActive) {

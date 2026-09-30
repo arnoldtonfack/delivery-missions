@@ -14,6 +14,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { DriversModule } from './modules/drivers/drivers.module';
+import { MissionsModule } from './modules/missions/missions.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { DriversModule } from './modules/drivers/drivers.module';
     // ── Modules métier (src/modules/<domaine>) ──
     AuthModule,
     DriversModule,
+    MissionsModule,
   ],
   controllers: [],
   providers: [
