@@ -1,6 +1,9 @@
-// Schéma Prisma — aucun modèle métier : les modèles seront ajoutés selon le sujet.
+// Schéma Prisma — thème 3 : gestion des missions de livraison.
 // Après modification : `pnpm prisma:migrate --name <nom>` (crée + applique la migration
 // dans src/database/migrations, puis régénère le client dans generated/prisma).
+//
+// Contraintes CHECK (non exprimables en Prisma) ajoutées à la main dans la migration
+// `init_delivery_missions` : raison obligatoire si FAILED, date de livraison si DELIVERED.
 
 generator client {
   provider = "prisma-client"
@@ -13,4 +16,88 @@ datasource db {
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
+enum Role {
+  DISPATCHER
+  DRIVER
+}
+
+/// PLANNED → STARTED → DELIVERED | FAILED. DELIVERED et FAILED sont terminaux.
+enum MissionStatus {
+  PLANNED
+  STARTED
+  DELIVERED
+  FAILED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
+
+/// Dispatcher ou chauffeur : un chauffeur est un utilisateur de rôle DRIVER.
+/// Jamais supprimé physiquement (historique conservé) : désactivé via `isActive`.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// Identifiant de connexion, normalisé en minuscules par l'API.
+  login        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  assignedMissions Mission[]              @relation("MissionDriver")
+  createdMissions  Mission[]              @relation("MissionCreator")
+  statusChanges    MissionStatusHistory[] @relation("StatusChangeActor")
+
+  @@index([role, isActive])
+}
+
+model Mission {
+  id              String        @id @default(uuid()) @db.Uuid
+  /// Référence métier, normalisée en majuscules par l'API.
+  reference       String        @unique
+  customerName    String
+  pickupAddress   String
+  deliveryAddress String
+  /// Jour prévu (sans heure) — « missions du jour » calculé dans le fuseau métier.
+  plannedDate     DateTime      @db.Date
+  status          MissionStatus @default(PLANNED)
+  failureReason   String?
+  deliveryComment String?
+  startedAt       DateTime?     @db.Timestamptz(3)
+  /// Horodatage serveur du passage à DELIVERED ou FAILED.
+  completedAt     DateTime?     @db.Timestamptz(3)
+  /// Verrou optimiste : incrémenté à chaque écriture, protège des doubles clics
+  /// et des transitions concurrentes.
+  version         Int           @default(0)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+
+  driverId    String @db.Uuid
+  driver      User   @relation("MissionDriver", fields: [driverId], references: [id], onDelete: Restrict)
+  createdById String @db.Uuid
+  createdBy   User   @relation("MissionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  statusHistory MissionStatusHistory[]
+
+  @@index([driverId, plannedDate, status])
+  @@index([plannedDate, status])
+}
+
+/// Journal append-only des changements de statut (qui, quand, de → vers).
+model MissionStatusHistory {
+  id         String         @id @default(uuid()) @db.Uuid
+  /// Null pour l'entrée de création (→ PLANNED).
+  fromStatus MissionStatus?
+  toStatus   MissionStatus
+  /// Raison d'échec ou commentaire de livraison au moment du changement.
+  note       String?
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime       @updatedAt @db.Timestamptz(3)
+
+  missionId String  @db.Uuid
+  mission   Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  actorId   String  @db.Uuid
+  actor     User    @relation("StatusChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([missionId, createdAt])
+}
