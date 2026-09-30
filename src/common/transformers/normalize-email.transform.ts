@@ -6,6 +6,6 @@ import { Transform } from 'class-transformer';
  * dans l'API (connexion, création/modification de chauffeur).
  */
 export const NormalizeEmail = (): PropertyDecorator =>
-  Transform(({ value }: { value: unknown }) =>
+  Transform(({ value }: { value: unknown }): unknown =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   );

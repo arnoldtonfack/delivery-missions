@@ -4,7 +4,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { MissionStatus, Role } from '../../../generated/prisma/client';
+import {
+  MissionStatus,
+  type Prisma,
+  Role,
+} from '../../../generated/prisma/client';
 import { hashPassword } from '../../common/crypto/password.util';
 import { PrismaService } from '../../database/prisma.service';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
@@ -12,13 +16,17 @@ import { toUserResponse, USER_RESPONSE_SELECT } from '../users/user.mapper';
 import type { CreateDriverDto } from './dto/create-driver.dto';
 import type { ListDriversQueryDto } from './dto/list-drivers-query.dto';
 import type { UpdateDriverDto } from './dto/update-driver.dto';
-import { lockDriver } from './driver-lock';
 
 /** Statuts qui empêchent de désactiver un chauffeur (mission à faire ou en cours). */
 const OPEN_MISSION_STATUSES: readonly MissionStatus[] = [
   MissionStatus.PLANNED,
   MissionStatus.STARTED,
 ];
+
+export interface ILockedDriver {
+  readonly id: string;
+  readonly isActive: boolean;
+}
 
 /**
  * Gestion des chauffeurs (utilisateurs de rôle DRIVER) par le dispatcher.
@@ -98,7 +106,7 @@ export class DriversService {
     return this.prisma.$transaction(async (tx) => {
       // Une affectation de mission concurrente (qui prend le même verrou) attend,
       // et ne peut donc pas se glisser entre le comptage et la désactivation.
-      const locked = await lockDriver(tx, id);
+      const locked = await this.lockDriver(tx, id);
       if (!locked) {
         throw new NotFoundException('DRIVER_NOT_FOUND');
       }
@@ -118,6 +126,25 @@ export class DriversService {
       this.logger.log(`Chauffeur ${isActive ? 'activé' : 'désactivé'} (${id})`);
       return toUserResponse(updated);
     });
+  }
+
+  /**
+   * Verrouille la ligne d'un chauffeur (`SELECT … FOR UPDATE`) jusqu'à la fin de
+   * la transaction `tx`. Pris par la désactivation ET par l'affectation d'une
+   * mission (`MissionsService`) : l'une attend l'autre, donc une mission ne peut
+   * jamais être affectée à un chauffeur en train d'être désactivé.
+   *
+   * @returns le chauffeur verrouillé, ou `null` si l'id n'est pas un DRIVER.
+   */
+  async lockDriver(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+  ): Promise<ILockedDriver | null> {
+    const rows = await tx.$queryRaw<ILockedDriver[]>`
+      SELECT "id", "isActive" FROM "User"
+      WHERE "id" = ${driverId}::uuid AND "role" = 'DRIVER'
+      FOR UPDATE`;
+    return rows[0] ?? null;
   }
 
   /**

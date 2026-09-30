@@ -6,6 +6,6 @@ import { Transform } from 'class-transformer';
  * laissées telles quelles pour que `@IsString()` les refuse.
  */
 export const Trim = (): PropertyDecorator =>
-  Transform(({ value }: { value: unknown }) =>
+  Transform(({ value }: { value: unknown }): unknown =>
     typeof value === 'string' ? value.trim() : value,
   );

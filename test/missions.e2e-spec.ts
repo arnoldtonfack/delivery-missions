@@ -346,17 +346,45 @@ describe('Missions (e2e)', () => {
         .expect(200);
     });
 
-    it('409 MISSION_NOT_EDITABLE once the mission is STARTED', async () => {
+    it('409 MISSION_NOT_EDITABLE once the mission is STARTED, even with an invalid driver in the body', async () => {
       const id = await newMission('patch-started');
       await prisma.mission.update({
         where: { id },
         data: { status: 'STARTED', startedAt: new Date() },
       });
 
-      const res = await patchMission(id, { customerName: 'Trop tard' }).expect(
-        409,
-      );
+      const res = await patchMission(id, {
+        customerName: 'Trop tard',
+        driverId: inactiveDriverId,
+      }).expect(409);
       expect(res.body).toMatchObject({ message: 'MISSION_NOT_EDITABLE' });
+    });
+
+    it('an overdue PLANNED mission must be rescheduled to be reassigned', async () => {
+      const id = await newMission('patch-overdue');
+      await prisma.mission.update({
+        where: { id },
+        data: { plannedDate: new Date('2000-01-01T00:00:00Z') },
+      });
+
+      const refused = await patchMission(id, {
+        driverId: otherDriverId,
+      }).expect(400);
+      expect(refused.body).toMatchObject({ message: 'PLANNED_DATE_IN_PAST' });
+
+      await patchMission(id, {
+        driverId: otherDriverId,
+        plannedDate: businessToday(),
+      }).expect(200);
+    });
+
+    it('empty body: 200, nothing written (version unchanged)', async () => {
+      const id = await newMission('patch-empty');
+
+      await patchMission(id, {}).expect(200);
+
+      const row = await prisma.mission.findUniqueOrThrow({ where: { id } });
+      expect(row.version).toBe(0);
     });
 
     it('400 DRIVER_INACTIVE when reassigning to a disabled driver', async () => {

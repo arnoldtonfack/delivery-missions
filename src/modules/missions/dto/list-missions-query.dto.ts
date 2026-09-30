@@ -20,10 +20,14 @@ export class ListMissionsQueryDto {
   @IsISO8601({ strict: true })
   readonly date?: string;
 
-  /** Ignoré pour un chauffeur : il ne voit jamais que ses propres missions. */
+  /**
+   * Pour un chauffeur, remplacé par son propre id (il ne voit que ses missions) ;
+   * doit quand même être un UUID valide s'il est envoyé.
+   */
   @ApiPropertyOptional({
     format: 'uuid',
-    description: 'Dispatcher uniquement (forcé à soi-même pour un chauffeur)',
+    description:
+      'Filtre du dispatcher ; pour un chauffeur, remplacé par son propre id',
   })
   @IsOptional()
   @IsUUID()

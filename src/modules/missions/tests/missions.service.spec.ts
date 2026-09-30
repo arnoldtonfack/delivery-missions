@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import { Prisma, Role } from '../../../../generated/prisma/client';
 import { businessToday } from '../../../common/utils/business-date.util';
 import { PrismaService } from '../../../database/prisma.service';
+import { DriversService } from '../../drivers/drivers.service';
 import type { CreateMissionDto } from '../dto/create-mission.dto';
 import { MissionsService } from '../missions.service';
 
@@ -22,7 +23,7 @@ const missionRow = (
   customerName: 'Client',
   pickupAddress: 'A',
   deliveryAddress: 'B',
-  plannedDate: new Date('2026-10-01T00:00:00Z'),
+  plannedDate: new Date('2099-10-01T00:00:00Z'),
   status: 'PLANNED',
   failureReason: null,
   deliveryComment: null,
@@ -53,22 +54,26 @@ describe('MissionsService', () => {
       create: jest.Mock;
       findFirst: jest.Mock;
       findMany: jest.Mock;
-      updateMany: jest.Mock;
-      count: jest.Mock;
-      findUniqueOrThrow: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
     };
     $transaction: jest.Mock;
-    $queryRaw: jest.Mock;
   };
+  let drivers: { lockDriver: jest.Mock };
 
   beforeEach(async () => {
+    // Verrou `SELECT … FOR UPDATE` du chauffeur (testé dans DriversService).
+    drivers = {
+      lockDriver: jest
+        .fn()
+        .mockResolvedValue({ id: DRIVER_ID, isActive: true }),
+    };
     prisma = {
       mission: {
         create: jest.fn().mockResolvedValue(missionRow()),
         findMany: jest.fn().mockResolvedValue([missionRow()]),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        count: jest.fn().mockResolvedValue(1),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(missionRow()),
+        findUnique: jest.fn().mockResolvedValue(missionRow()),
+        update: jest.fn().mockResolvedValue(missionRow()),
         findFirst: jest.fn().mockResolvedValue(
           missionRow({
             statusHistory: [
@@ -84,10 +89,6 @@ describe('MissionsService', () => {
           }),
         ),
       },
-      // Verrou `SELECT … FOR UPDATE` du chauffeur.
-      $queryRaw: jest
-        .fn()
-        .mockResolvedValue([{ id: DRIVER_ID, isActive: true }]),
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(
@@ -98,6 +99,7 @@ describe('MissionsService', () => {
       providers: [
         MissionsService,
         { provide: PrismaService, useValue: prisma },
+        { provide: DriversService, useValue: drivers },
       ],
     }).compile();
     service = module.get(MissionsService);
@@ -112,7 +114,7 @@ describe('MissionsService', () => {
         DISPATCHER_ID,
       );
 
-      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(drivers.lockDriver).toHaveBeenCalledWith(prisma, DRIVER_ID);
       const { data } = prisma.mission.create.mock.calls[0][0] as {
         data: Record<string, unknown>;
       };
@@ -129,7 +131,7 @@ describe('MissionsService', () => {
         },
       });
       expect(result).toMatchObject({
-        plannedDate: '2026-10-01',
+        plannedDate: '2099-10-01',
         status: 'PLANNED',
         driver: { id: DRIVER_ID, fullName: 'Jean Mbarga' },
       });
@@ -143,7 +145,7 @@ describe('MissionsService', () => {
     });
 
     it('refuses an id that is not a driver with DRIVER_NOT_FOUND', async () => {
-      prisma.$queryRaw.mockResolvedValue([]);
+      drivers.lockDriver.mockResolvedValue(null);
 
       await expect(service.create(createDto(), DISPATCHER_ID)).rejects.toThrow(
         new BadRequestException('DRIVER_NOT_FOUND'),
@@ -152,7 +154,7 @@ describe('MissionsService', () => {
     });
 
     it('refuses a disabled driver with DRIVER_INACTIVE', async () => {
-      prisma.$queryRaw.mockResolvedValue([{ id: DRIVER_ID, isActive: false }]);
+      drivers.lockDriver.mockResolvedValue({ id: DRIVER_ID, isActive: false });
 
       await expect(service.create(createDto(), DISPATCHER_ID)).rejects.toThrow(
         new BadRequestException('DRIVER_INACTIVE'),
@@ -214,7 +216,7 @@ describe('MissionsService', () => {
 
     it('maps rows to response DTOs (date as YYYY-MM-DD)', async () => {
       await expect(service.findAll({}, dispatcher)).resolves.toEqual([
-        expect.objectContaining({ id: MISSION_ID, plannedDate: '2026-10-01' }),
+        expect.objectContaining({ id: MISSION_ID, plannedDate: '2099-10-01' }),
       ]);
     });
   });
@@ -222,26 +224,33 @@ describe('MissionsService', () => {
   describe('update', () => {
     const OTHER_DRIVER_ID = '9e8d7c6b-5a49-4382-a716-151413121110';
 
+    const prismaError = (code: string): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError(code, {
+        code,
+        clientVersion: 'test',
+      });
+
     it('writes only while the mission is PLANNED (status in the where) and bumps the version', async () => {
       await service.update(MISSION_ID, { customerName: 'Nouveau client' });
 
-      expect(prisma.mission.updateMany).toHaveBeenCalledWith({
-        where: { id: MISSION_ID, status: 'PLANNED' },
-        data: expect.objectContaining({
-          customerName: 'Nouveau client',
-          version: { increment: 1 },
-        }) as unknown,
-      });
+      expect(prisma.mission.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: MISSION_ID, status: 'PLANNED' },
+          data: expect.objectContaining({
+            customerName: 'Nouveau client',
+            version: { increment: 1 },
+          }) as unknown,
+        }),
+      );
       // Pas de réassignation → pas de verrou chauffeur.
-      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(drivers.lockDriver).not.toHaveBeenCalled();
     });
 
     it('reassigns under the lock of the NEW driver', async () => {
       await service.update(MISSION_ID, { driverId: OTHER_DRIVER_ID });
 
-      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-      expect(prisma.$queryRaw.mock.calls[0]).toContain(OTHER_DRIVER_ID);
-      expect(prisma.mission.updateMany).toHaveBeenCalledWith(
+      expect(drivers.lockDriver).toHaveBeenCalledWith(prisma, OTHER_DRIVER_ID);
+      expect(prisma.mission.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             driverId: OTHER_DRIVER_ID,
@@ -251,39 +260,90 @@ describe('MissionsService', () => {
     });
 
     it('refuses to reassign to a disabled driver, without writing', async () => {
-      prisma.$queryRaw.mockResolvedValue([
-        { id: OTHER_DRIVER_ID, isActive: false },
-      ]);
+      drivers.lockDriver.mockResolvedValue({
+        id: OTHER_DRIVER_ID,
+        isActive: false,
+      });
 
       await expect(
         service.update(MISSION_ID, { driverId: OTHER_DRIVER_ID }),
       ).rejects.toThrow(new BadRequestException('DRIVER_INACTIVE'));
-      expect(prisma.mission.updateMany).not.toHaveBeenCalled();
+      expect(prisma.mission.update).not.toHaveBeenCalled();
     });
 
-    it('→ 409 MISSION_NOT_EDITABLE when the mission exists but is no longer PLANNED', async () => {
-      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
-      prisma.mission.count.mockResolvedValue(1);
+    it('checks the mission state BEFORE the body: unknown mission → 404 even with an invalid driver or date', async () => {
+      prisma.mission.findUnique.mockResolvedValue(null);
+      drivers.lockDriver.mockResolvedValue(null);
+
+      await expect(
+        service.update(MISSION_ID, {
+          driverId: OTHER_DRIVER_ID,
+          plannedDate: '2000-01-01',
+        }),
+      ).rejects.toThrow(new NotFoundException('MISSION_NOT_FOUND'));
+      expect(drivers.lockDriver).not.toHaveBeenCalled();
+    });
+
+    it('→ 409 MISSION_NOT_EDITABLE for a STARTED mission, whatever the body, without locking the driver', async () => {
+      prisma.mission.findUnique.mockResolvedValue(
+        missionRow({ status: 'STARTED' }),
+      );
+
+      await expect(
+        service.update(MISSION_ID, {
+          driverId: OTHER_DRIVER_ID,
+          plannedDate: '2000-01-01',
+        }),
+      ).rejects.toThrow(new ConflictException('MISSION_NOT_EDITABLE'));
+      expect(drivers.lockDriver).not.toHaveBeenCalled();
+    });
+
+    it('→ 409 MISSION_NOT_EDITABLE when the driver starts it between the read and the write (P2025)', async () => {
+      prisma.mission.update.mockRejectedValue(prismaError('P2025'));
 
       await expect(
         service.update(MISSION_ID, { customerName: 'X' }),
       ).rejects.toThrow(new ConflictException('MISSION_NOT_EDITABLE'));
     });
 
-    it('→ 404 MISSION_NOT_FOUND when the mission does not exist', async () => {
-      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
-      prisma.mission.count.mockResolvedValue(0);
+    it('maps the unique violation on the reference to MISSION_REFERENCE_ALREADY_USED', async () => {
+      prisma.mission.update.mockRejectedValue(prismaError('P2002'));
 
       await expect(
-        service.update(MISSION_ID, { customerName: 'X' }),
-      ).rejects.toThrow(new NotFoundException('MISSION_NOT_FOUND'));
+        service.update(MISSION_ID, { reference: 'CMD-002' }),
+      ).rejects.toThrow(
+        new ConflictException('MISSION_REFERENCE_ALREADY_USED'),
+      );
     });
 
     it('refuses to move the mission to a past date', async () => {
       await expect(
         service.update(MISSION_ID, { plannedDate: '2000-01-01' }),
       ).rejects.toThrow(new BadRequestException('PLANNED_DATE_IN_PAST'));
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.mission.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to edit or reassign an overdue mission without rescheduling it', async () => {
+      prisma.mission.findUnique.mockResolvedValue(
+        missionRow({ plannedDate: new Date('2000-01-01T00:00:00Z') }),
+      );
+
+      await expect(
+        service.update(MISSION_ID, { driverId: OTHER_DRIVER_ID }),
+      ).rejects.toThrow(new BadRequestException('PLANNED_DATE_IN_PAST'));
+
+      await service.update(MISSION_ID, {
+        driverId: OTHER_DRIVER_ID,
+        plannedDate: businessToday(),
+      });
+      expect(prisma.mission.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('empty body: returns the mission unchanged, without writing (version untouched)', async () => {
+      await expect(service.update(MISSION_ID, {})).resolves.toMatchObject({
+        id: MISSION_ID,
+      });
+      expect(prisma.mission.update).not.toHaveBeenCalled();
     });
   });
 

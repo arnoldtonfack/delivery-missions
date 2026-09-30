@@ -9,17 +9,24 @@
  */
 export const BUSINESS_TIME_ZONE = 'Africa/Douala';
 
-/** Format `YYYY-MM-DD` (la locale `en-CA` formate déjà ainsi). */
-const businessDayFormatter = new Intl.DateTimeFormat('en-CA', {
+const businessDayFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: BUSINESS_TIME_ZONE,
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
 });
 
-/** Jour courant `YYYY-MM-DD` dans le fuseau métier. */
-export const businessToday = (now: Date = new Date()): string =>
-  businessDayFormatter.format(now);
+/**
+ * Jour courant `YYYY-MM-DD` dans le fuseau métier. Assemblé depuis les parties
+ * (année, mois, jour) plutôt que depuis la chaîne formatée d'une locale, dont
+ * l'ordre et les séparateurs dépendent de la version d'ICU/CLDR.
+ */
+export const businessToday = (now: Date = new Date()): string => {
+  const parts = businessDayFormatter.formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
 
 /** `YYYY-MM-DD` → `Date` à minuit UTC, la valeur attendue par une colonne `@db.Date`. */
 export const dateOnlyToDate = (day: string): Date =>

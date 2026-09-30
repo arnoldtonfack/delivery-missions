@@ -10,9 +10,10 @@ import type { IAuthenticatedUser } from '../../common/guards/authenticated-reque
 import {
   businessToday,
   dateOnlyToDate,
+  dateToDateOnly,
 } from '../../common/utils/business-date.util';
 import { PrismaService } from '../../database/prisma.service';
-import { lockDriver } from '../drivers/driver-lock';
+import { DriversService } from '../drivers/drivers.service';
 import type { CreateMissionDto } from './dto/create-mission.dto';
 import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
@@ -45,7 +46,10 @@ const visibleBy = (viewer: TMissionViewer): Prisma.MissionWhereInput =>
 export class MissionsService {
   private readonly logger = new Logger(MissionsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly driversService: DriversService,
+  ) {}
 
   /**
    * Crée une mission PLANNED et sa première entrée d'historique (`null → PLANNED`,
@@ -88,44 +92,59 @@ export class MissionsService {
 
   /**
    * Modifie et/ou réassigne une mission, uniquement tant qu'elle est PLANNED.
-   * L'écriture est conditionnée par le statut DANS le `where` : si le chauffeur
-   * démarre la mission au même instant, l'une des deux écritures attend l'autre
-   * et la modification ne touche plus rien (→ 409), au lieu de changer une
-   * mission déjà en route. Pas d'entrée d'historique : le statut ne change pas.
+   *
+   * L'état de la mission est vérifié AVANT le contenu du corps : une mission
+   * inexistante répond 404 et une mission démarrée 409, quel que soit le corps.
+   * L'écriture reste conditionnée par le statut dans son `where` : si le
+   * chauffeur démarre la mission entre la lecture et l'écriture, rien n'est
+   * modifié (→ 409). Pas d'entrée d'historique : le statut ne change pas.
    */
   async update(id: string, dto: UpdateMissionDto): Promise<MissionResponseDto> {
-    if (dto.plannedDate !== undefined) {
-      assertNotInPast(dto.plannedDate);
-    }
     try {
       const mission = await this.prisma.$transaction(async (tx) => {
-        if (dto.driverId !== undefined) {
-          await this.assertAssignableDriver(tx, dto.driverId);
-        }
-        const { count } = await tx.mission.updateMany({
-          where: { id, status: MissionStatus.PLANNED },
-          data: {
-            reference: dto.reference,
-            customerName: dto.customerName,
-            pickupAddress: dto.pickupAddress,
-            deliveryAddress: dto.deliveryAddress,
-            ...(dto.plannedDate !== undefined && {
-              plannedDate: dateOnlyToDate(dto.plannedDate),
-            }),
-            driverId: dto.driverId,
-            version: { increment: 1 },
-          },
-        });
-        if (count === 0) {
-          const exists = await tx.mission.count({ where: { id } });
-          throw exists
-            ? new ConflictException('MISSION_NOT_EDITABLE')
-            : new NotFoundException('MISSION_NOT_FOUND');
-        }
-        return tx.mission.findUniqueOrThrow({
+        const current = await tx.mission.findUnique({
           where: { id },
           select: MISSION_RESPONSE_SELECT,
         });
+        if (!current) {
+          throw new NotFoundException('MISSION_NOT_FOUND');
+        }
+        if (current.status !== MissionStatus.PLANNED) {
+          throw new ConflictException('MISSION_NOT_EDITABLE');
+        }
+        // Corps vide : rien à écrire, `version` et `updatedAt` restent intacts.
+        if (Object.values(dto).every((value) => value === undefined)) {
+          return current;
+        }
+        // Date EFFECTIVE : une mission déjà en retard ne peut pas être modifiée
+        // ni réassignée sans être replanifiée, sinon elle resterait invisible
+        // dans les missions du jour du chauffeur.
+        assertNotInPast(dto.plannedDate ?? dateToDateOnly(current.plannedDate));
+        if (dto.driverId !== undefined) {
+          await this.assertAssignableDriver(tx, dto.driverId);
+        }
+        try {
+          return await tx.mission.update({
+            where: { id, status: MissionStatus.PLANNED },
+            data: {
+              reference: dto.reference,
+              customerName: dto.customerName,
+              pickupAddress: dto.pickupAddress,
+              deliveryAddress: dto.deliveryAddress,
+              ...(dto.plannedDate !== undefined && {
+                plannedDate: dateOnlyToDate(dto.plannedDate),
+              }),
+              driverId: dto.driverId,
+              version: { increment: 1 },
+            },
+            select: MISSION_RESPONSE_SELECT,
+          });
+        } catch (error) {
+          // P2025 : plus PLANNED depuis la lecture (démarrage concurrent).
+          throw isPrismaError(error, 'P2025')
+            ? new ConflictException('MISSION_NOT_EDITABLE')
+            : error;
+        }
       });
       this.logger.log(`Mission modifiée (${id})`);
       return toMissionResponse(mission);
@@ -182,7 +201,7 @@ export class MissionsService {
     tx: Prisma.TransactionClient,
     driverId: string,
   ): Promise<void> {
-    const driver = await lockDriver(tx, driverId);
+    const driver = await this.driversService.lockDriver(tx, driverId);
     if (!driver) {
       throw new BadRequestException('DRIVER_NOT_FOUND');
     }
@@ -206,7 +225,9 @@ const assertNotInPast = (plannedDate: string): void => {
  * écritures concurrentes. Toute autre erreur est rendue telle quelle.
  */
 const toReferenceConflict = (error: unknown): unknown =>
-  error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === 'P2002'
+  isPrismaError(error, 'P2002')
     ? new ConflictException('MISSION_REFERENCE_ALREADY_USED')
     : error;
+
+const isPrismaError = (error: unknown, code: string): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;

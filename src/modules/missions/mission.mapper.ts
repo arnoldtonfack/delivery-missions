@@ -56,7 +56,10 @@ export const MISSION_DETAIL_SELECT = {
       createdAt: true,
       actor: { select: { id: true, fullName: true } },
     },
-    orderBy: { createdAt: 'asc' },
+    // Départage à horodatage égal : l'ordre de l'enum (PLANNED < STARTED <
+    // DELIVERED | FAILED) est celui du workflow, et chaque statut n'est atteint
+    // qu'une fois par mission.
+    orderBy: [{ createdAt: 'asc' }, { toStatus: 'asc' }],
   },
 } as const satisfies Prisma.MissionSelect;
 

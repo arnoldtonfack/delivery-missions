@@ -111,14 +111,15 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    (un jour, aujourd'hui par défaut, sans historique), `GET /missions/:id` (détail +
    historique ; portée `visibleBy(viewer)` dans le `where`, à réutiliser pour la liste et
    les transitions → 404 `MISSION_NOT_FOUND` hors portée). Verrou chauffeur partagé
-   `lockDriver()` (`src/modules/drivers/driver-lock.ts`), dates métier
+   `DriversService.lockDriver(tx, id)` (MissionsModule importe DriversModule), dates métier
    `src/common/utils/business-date.util.ts` (`businessToday()`, `YYYY-MM-DD` ↔ `@db.Date`),
    `@Trim()`, `MISSION_RESPONSE_SELECT` / `toMissionResponse`. Codes : `DRIVER_NOT_FOUND` et
    `DRIVER_INACTIVE` (400, chauffeur du corps), `PLANNED_DATE_IN_PAST` (400),
    `MISSION_REFERENCE_ALREADY_USED` (409, via P2002). `PATCH /missions/:id` (DISPATCHER) :
-   `updateMany where { id, status: PLANNED }` + `version` incrémentée ; 0 ligne → 409
-   `MISSION_NOT_EDITABLE` ou 404 ; réassignation sous `lockDriver()` du nouveau chauffeur ;
-   pas d'entrée d'historique (le statut ne change pas). Chaque endpoint missions a une
+   état vérifié AVANT le corps (404 puis 409 `MISSION_NOT_EDITABLE`), corps vide = aucune
+   écriture, puis `update where { id, status: PLANNED }` + `version` incrémentée (P2025 →
+   409) ; réassignation sous `lockDriver()` du nouveau chauffeur ; pas d'entrée
+   d'historique (le statut ne change pas). Chaque endpoint missions a une
    `description` Swagger avec ses règles métier.
 
 ### À faire, dans cet ordre (une micro-étape = code + tests + typecheck/lint/test/e2e/build + commit + push)
@@ -146,8 +147,9 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
   majuscules), unique (`MISSION_REFERENCE_ALREADY_USED`).
 - La création écrit une entrée d'historique `null → PLANNED` (acteur = dispatcher).
 - Date prévue au format `YYYY-MM-DD`, **aujourd'hui ou plus tard** (fuseau Douala) à la
-  création et à la modification : une mission PLANNED dans le passé n'apparaîtrait jamais
-  dans « les missions du jour » du chauffeur.
+  création et à la modification (date **effective** : une mission PLANNED déjà en retard
+  doit être replanifiée pour être modifiée ou réassignée) : une mission PLANNED dans le
+  passé n'apparaîtrait jamais dans « les missions du jour » du chauffeur.
 - Modification / réassignation par le dispatcher **uniquement si PLANNED** (sinon 409).
   `DELIVERED` et `FAILED` sont terminaux ; une nouvelle tentative = une nouvelle mission.
 - Seul le **chauffeur assigné** fait les transitions. Statut + horodatage + historique dans

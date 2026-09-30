@@ -13,7 +13,7 @@ import { Trim } from '../../../common/transformers/trim.transform';
 export class CreateMissionDto {
   /** Normalisée (trim + majuscules) : `cmd-001 ` et `CMD-001` sont la même référence. */
   @ApiProperty({ example: 'CMD-2026-0001', maxLength: 40 })
-  @Transform(({ value }: { value: unknown }) =>
+  @Transform(({ value }: { value: unknown }): unknown =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   @IsString()

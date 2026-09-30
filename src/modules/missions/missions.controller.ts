@@ -83,8 +83,8 @@ export class MissionsController {
     description:
       'Sans `date` : missions prévues aujourd’hui (fuseau Africa/Douala, horloge ' +
       'serveur). Dispatcher : toutes, filtrables par `driverId` et `status`. ' +
-      'Chauffeur : uniquement les siennes — tout `driverId` envoyé est ignoré et ' +
-      'remplacé par le sien côté serveur. Sans historique (voir le détail).',
+      'Chauffeur : uniquement les siennes — tout `driverId` envoyé est remplacé ' +
+      'par le sien côté serveur. Sans historique (voir le détail).',
   })
   @ApiDataResponse(MissionResponseDto, { isArray: true })
   @ApiBadRequestResponse(
