@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AuthModule } from './modules/auth/auth.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { MissionsModule } from './modules/missions/missions.module';
 
@@ -73,6 +74,7 @@ import { MissionsModule } from './modules/missions/missions.module';
     AuthModule,
     DriversModule,
     MissionsModule,
+    DashboardModule,
   ],
   controllers: [],
   providers: [

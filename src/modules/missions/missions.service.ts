@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MissionStatus, Prisma, Role } from '../../../generated/prisma/client';
-import type { IAuthenticatedUser } from '../../common/guards/authenticated-request';
 import {
   businessToday,
   dateOnlyToDate,
@@ -22,6 +21,7 @@ import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
 import type { UpdateMissionDto } from './dto/update-mission.dto';
+import { type TMissionViewer, visibleBy } from './mission-access';
 import { canTransition } from './mission-status.machine';
 import {
   MISSION_DETAIL_SELECT,
@@ -29,18 +29,6 @@ import {
   toMissionDetailResponse,
   toMissionResponse,
 } from './mission.mapper';
-
-/** Ce dont le contrôle d'accès a besoin sur l'appelant. */
-export type TMissionViewer = Pick<IAuthenticatedUser, 'id' | 'role'>;
-
-/**
- * Missions visibles par l'appelant, à combiner dans chaque `where` : tout pour
- * le dispatcher, uniquement les siennes pour un chauffeur. Le filtre est dans la
- * REQUÊTE (pas un contrôle après lecture) : la mission d'un autre chauffeur est
- * introuvable, exactement comme une mission inexistante.
- */
-const visibleBy = (viewer: TMissionViewer): Prisma.MissionWhereInput =>
-  viewer.role === Role.DRIVER ? { driverId: viewer.id } : {};
 
 /**
  * Missions de livraison. Le contrôle de PROPRIÉTÉ (un chauffeur ne voit et ne
