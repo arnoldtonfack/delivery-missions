@@ -105,7 +105,7 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    bcrypt). DTO de mise à jour : `PartialType(..., { skipNullProperties: false })`.
 5. Transverse : `@NormalizeEmail()`, `@ApiDataResponse()` (Swagger de l'enveloppe réelle
    `{ success, data, timestamp }`), `unauthorizedResponse`/`forbiddenResponse`,
-   `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests (après les transitions) : 111 unitaires, 70 e2e.
+   `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests : 115 unitaires, 74 e2e.
    Réutiliser `USER_RESPONSE_SELECT` / `toUserResponse` (`src/modules/users/user.mapper.ts`).
 6. Missions : `POST /missions` (DISPATCHER), `GET /missions?date&driverId&status`
    (un jour, aujourd'hui par défaut, sans historique), `GET /missions/:id` (détail +
@@ -132,13 +132,14 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
 
 ### À faire, dans cet ordre (une micro-étape = code + tests + typecheck/lint/test/e2e/build + commit + push)
 
-1. **Dashboard** : nombre de missions par statut pour la journée.
-2. **Seed** idempotent : 1 dispatcher, 2 chauffeurs, missions datées relativement à
-   aujourd'hui dans tous les statuts ; comptes de test affichés dans le README.
-3. **README** : installation, comptes de test, choix justifiés (stack, modèle, hypothèses
-   métier ci-dessous), endpoints, fait / pas fait, améliorations, **section « Utilisation de
-   l'IA »** (obligatoire). Vérifier l'installation « à la jury » sur volume vierge.
-4. **Front** (dépôt séparé, après l'API) : écrans chauffeur mobile-first.
+API terminée : dashboard (`GET /dashboard?date`, module `src/modules/dashboard`), seed
+idempotent (`scripts/seed.ts`, `make seed-docker`, comptes `*@livraison.test` /
+`Demo1234!`, missions `DEMO-…` recréées à chaque lancement) et README jury (installation
+vérifiée sur clone neuf + volume vierge). Tests : 115 unitaires, 74 e2e.
+
+1. **Front** (dépôt séparé `delivery-missions-web`, autre session ; Codex pour le style) :
+   écrans chauffeur mobile-first. Côté API : corriger ce que le front révèle.
+2. Fin d'épreuve : rendre le dépôt API public ou inviter le jury (demander avant).
 
 ### Décisions métier à appliquer (hypothèses à reprendre dans le README)
 
