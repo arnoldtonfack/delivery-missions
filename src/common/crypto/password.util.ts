@@ -9,6 +9,9 @@ import { compare, hash } from 'bcryptjs';
  */
 const BCRYPT_ROUNDS = 10;
 
+/** bcrypt ne prend en compte que les 72 premiers OCTETS du mot de passe. */
+export const BCRYPT_MAX_BYTES = 72;
+
 /**
  * Hash factice (bcrypt valide) comparé quand l'e-mail est inconnu : la réponse
  * prend alors le même temps que pour un mauvais mot de passe, ce qui empêche de

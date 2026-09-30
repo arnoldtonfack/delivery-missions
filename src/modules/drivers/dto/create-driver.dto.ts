@@ -1,12 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsByteLength,
   IsEmail,
   IsNotEmpty,
   IsString,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { BCRYPT_MAX_BYTES } from '../../../common/crypto/password.util';
 import { NormalizeEmail } from '../../../common/transformers/normalize-email.transform';
 
 const trim = ({ value }: { value: unknown }): unknown =>
@@ -30,7 +32,10 @@ export class CreateDriverDto {
   @ApiProperty({ example: 'Password123!', minLength: 8, maxLength: 72 })
   @IsString()
   @MinLength(8)
-  // bcrypt ignore tout ce qui dépasse 72 octets : on refuse plutôt que tronquer.
-  @MaxLength(72)
+  // bcrypt ignore tout ce qui dépasse 72 OCTETS (pas caractères : « é » en vaut 2) :
+  // on refuse plutôt que de tronquer silencieusement.
+  @IsByteLength(0, BCRYPT_MAX_BYTES, {
+    message: `password must not exceed ${BCRYPT_MAX_BYTES} bytes`,
+  })
   readonly password: string;
 }

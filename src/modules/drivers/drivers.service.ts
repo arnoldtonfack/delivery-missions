@@ -95,11 +95,14 @@ export class DriversService {
    */
   async setActive(id: string, isActive: boolean): Promise<UserResponseDto> {
     return this.prisma.$transaction(async (tx) => {
-      const driver = await tx.user.findFirst({
-        where: { id, role: Role.DRIVER },
-        select: { id: true },
-      });
-      if (!driver) {
+      // Verrou de ligne sur le chauffeur jusqu'à la fin de la transaction : une
+      // affectation de mission concurrente (qui prend le même verrou) attend, et
+      // ne peut donc pas se glisser entre le comptage et la désactivation.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User"
+        WHERE "id" = ${id}::uuid AND "role" = 'DRIVER'
+        FOR UPDATE`;
+      if (locked.length === 0) {
         throw new NotFoundException('DRIVER_NOT_FOUND');
       }
       if (!isActive) {

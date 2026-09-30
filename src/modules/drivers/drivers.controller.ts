@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,15 +13,14 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
-  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Role } from '../../../generated/prisma/client';
+import { ApiDataResponse } from '../../common/swagger/api-data-response.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
   badRequestResponse,
@@ -47,7 +47,7 @@ export class DriversController {
 
   @Post()
   @ApiOperation({ summary: 'Créer un compte chauffeur' })
-  @ApiCreatedResponse({ type: UserResponseDto })
+  @ApiDataResponse(UserResponseDto, { status: HttpStatus.CREATED })
   @ApiBadRequestResponse(
     badRequestResponse('Corps invalide', [
       'password must be longer than or equal to 8 characters',
@@ -62,7 +62,7 @@ export class DriversController {
 
   @Get()
   @ApiOperation({ summary: 'Lister les chauffeurs (filtre actif / inactif)' })
-  @ApiOkResponse({ type: UserResponseDto, isArray: true })
+  @ApiDataResponse(UserResponseDto, { isArray: true })
   @ApiBadRequestResponse(
     badRequestResponse('Filtre invalide', ['isActive must be a boolean value']),
   )
@@ -72,7 +72,7 @@ export class DriversController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Détail d’un chauffeur' })
-  @ApiOkResponse({ type: UserResponseDto })
+  @ApiDataResponse(UserResponseDto)
   @ApiBadRequestResponse(
     badRequestResponse(
       'Identifiant invalide',
@@ -90,7 +90,7 @@ export class DriversController {
   @ApiOperation({
     summary: 'Modifier un chauffeur (nom, e-mail, mot de passe)',
   })
-  @ApiOkResponse({ type: UserResponseDto })
+  @ApiDataResponse(UserResponseDto)
   @ApiBadRequestResponse(
     badRequestResponse('Corps invalide', ['email must be an email']),
   )
@@ -109,7 +109,7 @@ export class DriversController {
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Activer / désactiver un chauffeur' })
-  @ApiOkResponse({ type: UserResponseDto })
+  @ApiDataResponse(UserResponseDto)
   @ApiBadRequestResponse(
     badRequestResponse('Corps invalide', ['isActive must be a boolean value']),
   )

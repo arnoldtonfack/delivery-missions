@@ -29,6 +29,7 @@ describe('DriversService', () => {
     };
     mission: { count: jest.Mock };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -41,6 +42,8 @@ describe('DriversService', () => {
         update: jest.fn().mockResolvedValue(driverRow()),
       },
       mission: { count: jest.fn().mockResolvedValue(0) },
+      // Verrou `SELECT … FOR UPDATE` : renvoie la ligne du chauffeur verrouillée.
+      $queryRaw: jest.fn().mockResolvedValue([{ id: DRIVER_ID }]),
       // Le callback reçoit le client transactionnel : ici, le même mock.
       $transaction: jest.fn(),
     };
@@ -122,6 +125,14 @@ describe('DriversService', () => {
       await expect(service.setActive(DRIVER_ID, false)).resolves.toMatchObject({
         isActive: false,
       });
+    });
+
+    it('setActive → DRIVER_NOT_FOUND when the locked row is not a driver', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await expect(service.setActive(DRIVER_ID, false)).rejects.toThrow(
+        new NotFoundException('DRIVER_NOT_FOUND'),
+      );
     });
 
     it('re-enables a driver without checking missions', async () => {

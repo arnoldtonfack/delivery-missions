@@ -10,7 +10,6 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiForbiddenResponse,
-  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiTooManyRequestsResponse,
@@ -20,6 +19,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { IAuthenticatedUser } from '../../common/guards/authenticated-request';
+import { ApiDataResponse } from '../../common/swagger/api-data-response.decorator';
 import {
   badRequestResponse,
   forbiddenResponse,
@@ -41,7 +41,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Connexion par e-mail / mot de passe → jeton JWT' })
-  @ApiOkResponse({ type: LoginResponseDto })
+  @ApiDataResponse(LoginResponseDto)
   @ApiBadRequestResponse(
     badRequestResponse('Corps de requête invalide', ['email must be an email']),
   )
@@ -64,7 +64,7 @@ export class AuthController {
   @Get('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Profil de l’utilisateur connecté' })
-  @ApiOkResponse({ type: UserResponseDto })
+  @ApiDataResponse(UserResponseDto)
   @ApiUnauthorizedResponse(unauthorizedResponse())
   me(@CurrentUser() user: IAuthenticatedUser): Promise<UserResponseDto> {
     return this.authService.me(user.id);

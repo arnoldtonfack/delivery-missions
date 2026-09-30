@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import {
+  IsByteLength,
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { BCRYPT_MAX_BYTES } from '../../../common/crypto/password.util';
 import { NormalizeEmail } from '../../../common/transformers/normalize-email.transform';
 
 export class LoginDto {
@@ -12,6 +19,9 @@ export class LoginDto {
   @ApiProperty({ example: 'Password123!' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(128)
+  // Même limite qu'à la création : au-delà, bcrypt tronquerait la saisie.
+  @IsByteLength(0, BCRYPT_MAX_BYTES, {
+    message: `password must not exceed ${BCRYPT_MAX_BYTES} bytes`,
+  })
   readonly password: string;
 }

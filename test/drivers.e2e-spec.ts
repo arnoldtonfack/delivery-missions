@@ -169,6 +169,35 @@ describe('Drivers (e2e)', () => {
       .expect(200);
   });
 
+  it.each([['fullName'], ['email'], ['password']])(
+    'PATCH /drivers/:id with %s: null → 400 (not a 500)',
+    async (field) => {
+      const created = await createDriver(`null-${field.toLowerCase()}`).expect(
+        201,
+      );
+      const id = created.body.data.id as string;
+
+      await http()
+        .patch(apiPath(`drivers/${id}`))
+        .set('Authorization', `Bearer ${dispatcherToken}`)
+        .send({ [field]: null })
+        .expect(400);
+    },
+  );
+
+  it('POST /drivers → 400 when the password exceeds 72 BYTES (bcrypt limit), even under 72 characters', async () => {
+    // 37 caractères mais 73 octets UTF-8 : bcrypt tronquerait silencieusement.
+    await http()
+      .post(apiPath('drivers'))
+      .set('Authorization', `Bearer ${dispatcherToken}`)
+      .send({
+        fullName: 'Multibyte',
+        email: email('multibyte'),
+        password: `${'é'.repeat(36)}A`,
+      })
+      .expect(400);
+  });
+
   it('PATCH /drivers/:id/status → 409 while the driver has an open mission, then disables and blocks login', async () => {
     const created = await createDriver('to-disable').expect(201);
     const id = created.body.data.id as string;
