@@ -283,13 +283,6 @@ d'erreurs, seed et tests.
 
 ## Utilisation de l'IA
 
-Des assistants IA ont été utilisés pendant l'épreuve :
-
-- **Claude Code (Anthropic)** : génération du code de l'API (modules, tests, migrations,
-  seed) et de ce README, étape par étape, à partir des décisions prises par le candidat
-  (modèle de données, règles métier, hypothèses ci-dessus).
-- **Codex (OpenAI)** : relecture du code, en lecture seule, et style de l'interface.
-
-Chaque étape a été relue et vérifiée par le candidat : linter, typage, tests unitaires et
-e2e, build et tests manuels. Les retours de relecture n'ont été corrigés qu'après
-vérification par le candidat.
+Assistants IA utilisés (Claude Code, Codex) pour la génération et la relecture du code.
+Les choix de conception, les règles métier et les vérifications (tests, relecture) ont été
+faits par le candidat.
