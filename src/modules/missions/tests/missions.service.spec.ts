@@ -195,11 +195,18 @@ describe('MissionsService', () => {
         }
       ).where;
 
-    it("defaults to today's missions (Africa/Douala)", async () => {
+    it('dispatcher without date: every date', async () => {
       await service.findAll({}, dispatcher);
+
+      expect(whereOfLastCall()).toEqual({});
+    });
+
+    it("driver without date: today's missions (Africa/Douala)", async () => {
+      await service.findAll({}, driver);
 
       expect(whereOfLastCall()).toEqual({
         plannedDate: new Date(`${businessToday()}T00:00:00.000Z`),
+        driverId: DRIVER_ID,
       });
     });
 

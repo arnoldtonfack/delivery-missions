@@ -9,11 +9,15 @@ import {
 import { MissionStatus } from '../../../../generated/prisma/client';
 
 export class ListMissionsQueryDto {
-  /** Jour prévu. Absent = aujourd'hui (fuseau Africa/Douala, horloge serveur). */
+  /**
+   * Jour prévu. Absent : toutes les dates pour le dispatcher, aujourd'hui pour le
+   * chauffeur (fuseau Africa/Douala, horloge serveur).
+   */
   @ApiPropertyOptional({
     example: '2026-10-01',
     format: 'date',
-    description: 'Jour prévu ; aujourd’hui (Africa/Douala) par défaut',
+    description:
+      'Jour prévu. Absent : toutes les dates (dispatcher), aujourd’hui en Africa/Douala (chauffeur)',
   })
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' })

@@ -233,7 +233,7 @@ Détail des corps, réponses et erreurs dans **Swagger** (`/docs`).
 | PATCH | `/drivers/:id` | DISPATCHER | Modifier un chauffeur |
 | PATCH | `/drivers/:id/status` | DISPATCHER | Activer / désactiver un chauffeur |
 | POST | `/missions` | DISPATCHER | Créer et assigner une mission |
-| GET | `/missions?date=&driverId=&status=` | tous | Missions d'un jour (aujourd'hui par défaut) ; un chauffeur ne voit que les siennes |
+| GET | `/missions?date=&driverId=&status=` | tous | Plus récentes d'abord. Sans `date` : toutes les dates (dispatcher), aujourd'hui (chauffeur, qui ne voit que les siennes) |
 | GET | `/missions/:id` | tous | Détail + historique des statuts (qui, quand) |
 | PATCH | `/missions/:id` | DISPATCHER | Modifier / réassigner (si `PLANNED`) |
 | POST | `/missions/:id/start` | DRIVER assigné | `PLANNED → STARTED` |
@@ -284,7 +284,8 @@ d'erreurs, seed et tests.
 - Fonctionnalités bonus (position GPS, photo ou signature, notification d'assignation,
   mode hors ligne).
 - Suppression d'une mission : elle n'est pas prévue, pour garder l'historique.
-- Pagination de la liste : elle est bornée à un jour.
+- Pagination de la liste : sans filtre de date, le dispatcher reçoit toutes les missions
+  (volume d'une démo) ; à ajouter avant un usage réel.
 
 ## Améliorations possibles
 

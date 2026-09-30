@@ -228,8 +228,21 @@ describe('Missions (e2e)', () => {
       ).toBe(true);
     });
 
+    it('dispatcher without date: every date', async () => {
+      const ids = idsOf(await listMissions(dispatcherToken).expect(200));
+
+      expect(ids).toEqual(
+        expect.arrayContaining([
+          todayMissionId,
+          tomorrowMissionId,
+          otherDriverMissionId,
+        ]),
+      );
+    });
+
     it('dispatcher: filters by date, driver and status', async () => {
       const byDriver = await listMissions(dispatcherToken, {
+        date: businessToday(),
         driverId: otherDriverId,
       }).expect(200);
       expect(idsOf(byDriver)).toEqual([otherDriverMissionId]);
@@ -242,6 +255,7 @@ describe('Missions (e2e)', () => {
       expect(idsOf(byDate)).toEqual([tomorrowMissionId]);
 
       const byStatus = await listMissions(dispatcherToken, {
+        date: businessToday(),
         driverId,
         status: 'DELIVERED',
       }).expect(200);

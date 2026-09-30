@@ -146,7 +146,8 @@ export class MissionsService {
   }
 
   /**
-   * Liste filtrée d'un jour (aujourd'hui par défaut). Pour un chauffeur, la portée
+   * Liste filtrée. Sans `date` : toutes les dates pour le dispatcher, aujourd'hui
+   * pour le chauffeur (« ses missions du jour »). Pour un chauffeur, la portée
    * `visibleBy` est appliquée EN DERNIER : elle écrase tout `driverId` envoyé.
    * Sans historique (pas de N+1) : il est dans le détail.
    */
@@ -154,9 +155,12 @@ export class MissionsService {
     query: ListMissionsQueryDto,
     viewer: TMissionViewer,
   ): Promise<MissionResponseDto[]> {
+    // Sans date : toutes les dates pour le dispatcher, la journée pour le chauffeur.
+    const date =
+      query.date ?? (viewer.role === Role.DRIVER ? businessToday() : undefined);
     const missions = await this.prisma.mission.findMany({
       where: {
-        plannedDate: dateOnlyToDate(query.date ?? businessToday()),
+        ...(date !== undefined && { plannedDate: dateOnlyToDate(date) }),
         ...(query.driverId !== undefined && { driverId: query.driverId }),
         ...(query.status !== undefined && { status: query.status }),
         ...visibleBy(viewer),
