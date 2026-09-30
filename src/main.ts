@@ -24,8 +24,13 @@ async function bootstrap(): Promise<void> {
   app.set('trust proxy', 1);
   app.enableShutdownHooks();
 
-  // Security
-  app.use(helmet());
+  // Security. Sans `upgrade-insecure-requests` : l'API peut être servie en HTTP simple
+  // (démo IP:port) ; la directive ferait charger les assets Swagger en https:// → page vide.
+  app.use(
+    helmet({
+      contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
+    }),
+  );
 
   // CORS : liste explicite d'origines (CORS_ORIGIN, séparées par des virgules).
   // En dev sans valeur, toutes les origines sont acceptées ; en prod elle est exigée.
