@@ -1,7 +1,7 @@
 .PHONY: help up down restart logs ps build rebuild infra \
         db-shell db-reset \
         redis-shell redis-flush \
-        migrate migrate-prod migrate-reset prisma-studio prisma-generate seed
+        migrate migrate-prod migrate-reset prisma-studio prisma-generate seed seed-docker
 
 # Charge .env pour que DB_USER, REDIS_PASSWORD… soient disponibles dans les recettes.
 -include .env
@@ -45,7 +45,8 @@ help:
 	@echo "  $(GREEN)make migrate-reset$(RESET)   Reset complet de la base"
 	@echo "  $(GREEN)make prisma-studio$(RESET)   Ouvrir Prisma Studio"
 	@echo "  $(GREEN)make prisma-generate$(RESET) Régénérer le client Prisma"
-	@echo "  $(GREEN)make seed$(RESET)            Lancer le seed"
+	@echo "  $(GREEN)make seed$(RESET)            Lancer le seed (hôte, pnpm)"
+	@echo "  $(GREEN)make seed-docker$(RESET)     Lancer le seed dans le conteneur de l'app"
 	@echo ""
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
@@ -113,3 +114,7 @@ prisma-generate:
 
 seed:
 	pnpm seed
+
+# Même seed, compilé dans l'image (dist/scripts/seed.js) : rien à installer sur l'hôte.
+seed-docker:
+	docker compose run --rm app node dist/scripts/seed
