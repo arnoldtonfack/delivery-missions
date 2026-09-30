@@ -107,7 +107,7 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    `{ success, data, timestamp }`), `unauthorizedResponse`/`forbiddenResponse`,
    `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests : 48 unitaires, 24 e2e.
    Réutiliser `USER_RESPONSE_SELECT` / `toUserResponse` (`src/modules/users/user.mapper.ts`).
-6. Missions (en cours) : `POST /missions` (DISPATCHER), `GET /missions?date&driverId&status`
+6. Missions : `POST /missions` (DISPATCHER), `GET /missions?date&driverId&status`
    (un jour, aujourd'hui par défaut, sans historique), `GET /missions/:id` (détail +
    historique ; portée `visibleBy(viewer)` dans le `where`, à réutiliser pour la liste et
    les transitions → 404 `MISSION_NOT_FOUND` hors portée). Verrou chauffeur partagé
@@ -115,20 +115,22 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    `src/common/utils/business-date.util.ts` (`businessToday()`, `YYYY-MM-DD` ↔ `@db.Date`),
    `@Trim()`, `MISSION_RESPONSE_SELECT` / `toMissionResponse`. Codes : `DRIVER_NOT_FOUND` et
    `DRIVER_INACTIVE` (400, chauffeur du corps), `PLANNED_DATE_IN_PAST` (400),
-   `MISSION_REFERENCE_ALREADY_USED` (409, via P2002). Chaque endpoint missions a une
-   `description` Swagger avec ses règles métier. Reste : modification/réassignation.
+   `MISSION_REFERENCE_ALREADY_USED` (409, via P2002). `PATCH /missions/:id` (DISPATCHER) :
+   `updateMany where { id, status: PLANNED }` + `version` incrémentée ; 0 ligne → 409
+   `MISSION_NOT_EDITABLE` ou 404 ; réassignation sous `lockDriver()` du nouveau chauffeur ;
+   pas d'entrée d'historique (le statut ne change pas). Chaque endpoint missions a une
+   `description` Swagger avec ses règles métier.
 
 ### À faire, dans cet ordre (une micro-étape = code + tests + typecheck/lint/test/e2e/build + commit + push)
 
-1. **Missions** (`src/modules/missions`) : création, modification, liste filtrée, détail.
-2. **Transitions** : démarrer / livrer / échouer.
-3. **Dashboard** : nombre de missions par statut pour la journée.
-4. **Seed** idempotent : 1 dispatcher, 2 chauffeurs, missions datées relativement à
+1. **Transitions** : démarrer / livrer / échouer.
+2. **Dashboard** : nombre de missions par statut pour la journée.
+3. **Seed** idempotent : 1 dispatcher, 2 chauffeurs, missions datées relativement à
    aujourd'hui dans tous les statuts ; comptes de test affichés dans le README.
-5. **README** : installation, comptes de test, choix justifiés (stack, modèle, hypothèses
+4. **README** : installation, comptes de test, choix justifiés (stack, modèle, hypothèses
    métier ci-dessous), endpoints, fait / pas fait, améliorations, **section « Utilisation de
    l'IA »** (obligatoire). Vérifier l'installation « à la jury » sur volume vierge.
-6. **Front** (dépôt séparé, après l'API) : écrans chauffeur mobile-first.
+5. **Front** (dépôt séparé, après l'API) : écrans chauffeur mobile-first.
 
 ### Décisions métier à appliquer (hypothèses à reprendre dans le README)
 

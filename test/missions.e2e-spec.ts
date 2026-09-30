@@ -306,4 +306,96 @@ describe('Missions (e2e)', () => {
       await getMission('not-a-uuid', dispatcherToken).expect(400);
     });
   });
+
+  describe('PATCH /missions/:id', () => {
+    const patchMission = (
+      id: string,
+      body: Record<string, unknown>,
+      token = dispatcherToken,
+    ): request.Test =>
+      http()
+        .patch(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    const newMission = async (name: string): Promise<string> => {
+      const res = await createMission(missionBody(name)).expect(201);
+      return res.body.data.id as string;
+    };
+
+    it('updates the sent fields and reassigns: the mission moves from one driver to the other', async () => {
+      const id = await newMission('patch-ok');
+
+      const res = await patchMission(id, {
+        deliveryAddress: '  Nouvelle adresse ',
+        driverId: otherDriverId,
+      }).expect(200);
+
+      expect(res.body.data).toMatchObject({
+        deliveryAddress: 'Nouvelle adresse',
+        customerName: 'Client E2E',
+        status: 'PLANNED',
+        driver: { id: otherDriverId },
+      });
+      await http()
+        .get(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(404);
+      await http()
+        .get(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${otherDriverToken}`)
+        .expect(200);
+    });
+
+    it('409 MISSION_NOT_EDITABLE once the mission is STARTED', async () => {
+      const id = await newMission('patch-started');
+      await prisma.mission.update({
+        where: { id },
+        data: { status: 'STARTED', startedAt: new Date() },
+      });
+
+      const res = await patchMission(id, { customerName: 'Trop tard' }).expect(
+        409,
+      );
+      expect(res.body).toMatchObject({ message: 'MISSION_NOT_EDITABLE' });
+    });
+
+    it('400 DRIVER_INACTIVE when reassigning to a disabled driver', async () => {
+      const id = await newMission('patch-inactive');
+
+      const res = await patchMission(id, {
+        driverId: inactiveDriverId,
+      }).expect(400);
+      expect(res.body).toMatchObject({ message: 'DRIVER_INACTIVE' });
+    });
+
+    it('409 MISSION_REFERENCE_ALREADY_USED when taking the reference of another mission', async () => {
+      const id = await newMission('patch-ref');
+
+      const res = await patchMission(id, {
+        reference: reference('patch-ok'),
+      }).expect(409);
+      expect(res.body).toMatchObject({
+        message: 'MISSION_REFERENCE_ALREADY_USED',
+      });
+    });
+
+    it.each([
+      ['a null field', { customerName: null }],
+      ['a past date', { plannedDate: '2000-01-01' }],
+      ['a status change (not editable here)', { status: 'DELIVERED' }],
+    ])('400 on %s', async (_label, body) => {
+      const id = await newMission(`patch-bad-${Object.keys(body)[0]}`);
+
+      await patchMission(id, body).expect(400);
+    });
+
+    it('404 on an unknown mission, 403 for a DRIVER', async () => {
+      await patchMission('00000000-0000-4000-8000-000000000000', {
+        customerName: 'X',
+      }).expect(404);
+
+      const id = await newMission('patch-by-driver');
+      await patchMission(id, { customerName: 'X' }, driverToken).expect(403);
+    });
+  });
 });

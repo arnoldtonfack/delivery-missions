@@ -17,6 +17,7 @@ import type { CreateMissionDto } from './dto/create-mission.dto';
 import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
+import type { UpdateMissionDto } from './dto/update-mission.dto';
 import {
   MISSION_DETAIL_SELECT,
   MISSION_RESPONSE_SELECT,
@@ -54,10 +55,7 @@ export class MissionsService {
     dto: CreateMissionDto,
     dispatcherId: string,
   ): Promise<MissionResponseDto> {
-    // Comparaison lexicographique valide : les deux sont au format YYYY-MM-DD.
-    if (dto.plannedDate < businessToday()) {
-      throw new BadRequestException('PLANNED_DATE_IN_PAST');
-    }
+    assertNotInPast(dto.plannedDate);
     try {
       const mission = await this.prisma.$transaction(async (tx) => {
         await this.assertAssignableDriver(tx, dto.driverId);
@@ -84,13 +82,55 @@ export class MissionsService {
       this.logger.log(`Mission créée (${mission.id})`);
       return toMissionResponse(mission);
     } catch (error) {
-      // Seule contrainte d'unicité de Mission hors clé primaire : la référence.
-      // Pas de lecture préalable : la contrainte en base tranche aussi entre
-      // deux créations concurrentes.
-      if (isUniqueViolation(error)) {
-        throw new ConflictException('MISSION_REFERENCE_ALREADY_USED');
-      }
-      throw error;
+      throw toReferenceConflict(error);
+    }
+  }
+
+  /**
+   * Modifie et/ou réassigne une mission, uniquement tant qu'elle est PLANNED.
+   * L'écriture est conditionnée par le statut DANS le `where` : si le chauffeur
+   * démarre la mission au même instant, l'une des deux écritures attend l'autre
+   * et la modification ne touche plus rien (→ 409), au lieu de changer une
+   * mission déjà en route. Pas d'entrée d'historique : le statut ne change pas.
+   */
+  async update(id: string, dto: UpdateMissionDto): Promise<MissionResponseDto> {
+    if (dto.plannedDate !== undefined) {
+      assertNotInPast(dto.plannedDate);
+    }
+    try {
+      const mission = await this.prisma.$transaction(async (tx) => {
+        if (dto.driverId !== undefined) {
+          await this.assertAssignableDriver(tx, dto.driverId);
+        }
+        const { count } = await tx.mission.updateMany({
+          where: { id, status: MissionStatus.PLANNED },
+          data: {
+            reference: dto.reference,
+            customerName: dto.customerName,
+            pickupAddress: dto.pickupAddress,
+            deliveryAddress: dto.deliveryAddress,
+            ...(dto.plannedDate !== undefined && {
+              plannedDate: dateOnlyToDate(dto.plannedDate),
+            }),
+            driverId: dto.driverId,
+            version: { increment: 1 },
+          },
+        });
+        if (count === 0) {
+          const exists = await tx.mission.count({ where: { id } });
+          throw exists
+            ? new ConflictException('MISSION_NOT_EDITABLE')
+            : new NotFoundException('MISSION_NOT_FOUND');
+        }
+        return tx.mission.findUniqueOrThrow({
+          where: { id },
+          select: MISSION_RESPONSE_SELECT,
+        });
+      });
+      this.logger.log(`Mission modifiée (${id})`);
+      return toMissionResponse(mission);
+    } catch (error) {
+      throw toReferenceConflict(error);
     }
   }
 
@@ -152,6 +192,21 @@ export class MissionsService {
   }
 }
 
-const isUniqueViolation = (error: unknown): boolean =>
+/** Une mission se planifie aujourd'hui ou plus tard (fuseau métier). */
+const assertNotInPast = (plannedDate: string): void => {
+  // Comparaison lexicographique valide : les deux sont au format YYYY-MM-DD.
+  if (plannedDate < businessToday()) {
+    throw new BadRequestException('PLANNED_DATE_IN_PAST');
+  }
+};
+
+/**
+ * Seule contrainte d'unicité de Mission hors clé primaire : la référence. Pas
+ * de lecture préalable : la contrainte en base tranche aussi entre deux
+ * écritures concurrentes. Toute autre erreur est rendue telle quelle.
+ */
+const toReferenceConflict = (error: unknown): unknown =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === 'P2002';
+  error.code === 'P2002'
+    ? new ConflictException('MISSION_REFERENCE_ALREADY_USED')
+    : error;

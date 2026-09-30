@@ -49,7 +49,14 @@ const createDto = (
 describe('MissionsService', () => {
   let service: MissionsService;
   let prisma: {
-    mission: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock };
+    mission: {
+      create: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      updateMany: jest.Mock;
+      count: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
+    };
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
   };
@@ -59,6 +66,9 @@ describe('MissionsService', () => {
       mission: {
         create: jest.fn().mockResolvedValue(missionRow()),
         findMany: jest.fn().mockResolvedValue([missionRow()]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        count: jest.fn().mockResolvedValue(1),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(missionRow()),
         findFirst: jest.fn().mockResolvedValue(
           missionRow({
             statusHistory: [
@@ -206,6 +216,74 @@ describe('MissionsService', () => {
       await expect(service.findAll({}, dispatcher)).resolves.toEqual([
         expect.objectContaining({ id: MISSION_ID, plannedDate: '2026-10-01' }),
       ]);
+    });
+  });
+
+  describe('update', () => {
+    const OTHER_DRIVER_ID = '9e8d7c6b-5a49-4382-a716-151413121110';
+
+    it('writes only while the mission is PLANNED (status in the where) and bumps the version', async () => {
+      await service.update(MISSION_ID, { customerName: 'Nouveau client' });
+
+      expect(prisma.mission.updateMany).toHaveBeenCalledWith({
+        where: { id: MISSION_ID, status: 'PLANNED' },
+        data: expect.objectContaining({
+          customerName: 'Nouveau client',
+          version: { increment: 1 },
+        }) as unknown,
+      });
+      // Pas de réassignation → pas de verrou chauffeur.
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('reassigns under the lock of the NEW driver', async () => {
+      await service.update(MISSION_ID, { driverId: OTHER_DRIVER_ID });
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw.mock.calls[0]).toContain(OTHER_DRIVER_ID);
+      expect(prisma.mission.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            driverId: OTHER_DRIVER_ID,
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('refuses to reassign to a disabled driver, without writing', async () => {
+      prisma.$queryRaw.mockResolvedValue([
+        { id: OTHER_DRIVER_ID, isActive: false },
+      ]);
+
+      await expect(
+        service.update(MISSION_ID, { driverId: OTHER_DRIVER_ID }),
+      ).rejects.toThrow(new BadRequestException('DRIVER_INACTIVE'));
+      expect(prisma.mission.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('→ 409 MISSION_NOT_EDITABLE when the mission exists but is no longer PLANNED', async () => {
+      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
+      prisma.mission.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(MISSION_ID, { customerName: 'X' }),
+      ).rejects.toThrow(new ConflictException('MISSION_NOT_EDITABLE'));
+    });
+
+    it('→ 404 MISSION_NOT_FOUND when the mission does not exist', async () => {
+      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
+      prisma.mission.count.mockResolvedValue(0);
+
+      await expect(
+        service.update(MISSION_ID, { customerName: 'X' }),
+      ).rejects.toThrow(new NotFoundException('MISSION_NOT_FOUND'));
+    });
+
+    it('refuses to move the mission to a past date', async () => {
+      await expect(
+        service.update(MISSION_ID, { plannedDate: '2000-01-01' }),
+      ).rejects.toThrow(new BadRequestException('PLANNED_DATE_IN_PAST'));
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

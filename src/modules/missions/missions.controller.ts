@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -34,6 +35,7 @@ import { CreateMissionDto } from './dto/create-mission.dto';
 import { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import { MissionResponseDto } from './dto/mission-response.dto';
+import { UpdateMissionDto } from './dto/update-mission.dto';
 import { MissionsService } from './missions.service';
 
 @ApiTags('missions')
@@ -124,5 +126,41 @@ export class MissionsController {
     @CurrentUser() user: IAuthenticatedUser,
   ): Promise<MissionDetailResponseDto> {
     return this.missionsService.findOne(id, user);
+  }
+
+  @Patch(':id')
+  @Roles(Role.DISPATCHER)
+  @ApiOperation({
+    summary: 'Modifier ou réassigner une mission (uniquement si PLANNED)',
+    description:
+      'Seuls les champs envoyés sont modifiés ; `driverId` réassigne la mission à un ' +
+      'autre DRIVER actif. Refusé (409) dès que la mission est STARTED, DELIVERED ou ' +
+      'FAILED : une mission en route ou terminée ne change plus. Mêmes règles qu’à la ' +
+      'création pour la date (aujourd’hui ou plus tard) et la référence (unique).',
+  })
+  @ApiDataResponse(MissionResponseDto)
+  @ApiBadRequestResponse(
+    badRequestResponse(
+      'Corps invalide, date passée (PLANNED_DATE_IN_PAST), chauffeur inconnu ' +
+        '(DRIVER_NOT_FOUND) ou désactivé (DRIVER_INACTIVE)',
+      'PLANNED_DATE_IN_PAST',
+    ),
+  )
+  @ApiForbiddenResponse(forbiddenResponse('Réservé au rôle DISPATCHER'))
+  @ApiNotFoundResponse(
+    notFoundResponse('Mission introuvable', 'MISSION_NOT_FOUND'),
+  )
+  @ApiConflictResponse(
+    conflictResponse(
+      'Mission plus PLANNED (MISSION_NOT_EDITABLE) ou référence déjà utilisée ' +
+        '(MISSION_REFERENCE_ALREADY_USED)',
+      'MISSION_NOT_EDITABLE',
+    ),
+  )
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMissionDto,
+  ): Promise<MissionResponseDto> {
+    return this.missionsService.update(id, dto);
   }
 }
