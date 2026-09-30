@@ -49,7 +49,7 @@ const createDto = (
 describe('MissionsService', () => {
   let service: MissionsService;
   let prisma: {
-    mission: { create: jest.Mock; findFirst: jest.Mock };
+    mission: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock };
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
   };
@@ -58,6 +58,7 @@ describe('MissionsService', () => {
     prisma = {
       mission: {
         create: jest.fn().mockResolvedValue(missionRow()),
+        findMany: jest.fn().mockResolvedValue([missionRow()]),
         findFirst: jest.fn().mockResolvedValue(
           missionRow({
             statusHistory: [
@@ -163,10 +164,52 @@ describe('MissionsService', () => {
     });
   });
 
-  describe('findOne', () => {
-    const dispatcher = { id: DISPATCHER_ID, role: Role.DISPATCHER };
-    const driver = { id: DRIVER_ID, role: Role.DRIVER };
+  const dispatcher = { id: DISPATCHER_ID, role: Role.DISPATCHER };
+  const driver = { id: DRIVER_ID, role: Role.DRIVER };
 
+  describe('findAll', () => {
+    const whereOfLastCall = (): Record<string, unknown> =>
+      (
+        prisma.mission.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
+
+    it("defaults to today's missions (Africa/Douala)", async () => {
+      await service.findAll({}, dispatcher);
+
+      expect(whereOfLastCall()).toEqual({
+        plannedDate: new Date(`${businessToday()}T00:00:00.000Z`),
+      });
+    });
+
+    it('passes the dispatcher filters through', async () => {
+      await service.findAll(
+        { date: '2026-10-02', driverId: DRIVER_ID, status: 'STARTED' },
+        dispatcher,
+      );
+
+      expect(whereOfLastCall()).toEqual({
+        plannedDate: new Date('2026-10-02T00:00:00.000Z'),
+        driverId: DRIVER_ID,
+        status: 'STARTED',
+      });
+    });
+
+    it("forces a DRIVER's own id, whatever driverId he sends", async () => {
+      await service.findAll({ driverId: 'another-driver-id' }, driver);
+
+      expect(whereOfLastCall()).toMatchObject({ driverId: DRIVER_ID });
+    });
+
+    it('maps rows to response DTOs (date as YYYY-MM-DD)', async () => {
+      await expect(service.findAll({}, dispatcher)).resolves.toEqual([
+        expect.objectContaining({ id: MISSION_ID, plannedDate: '2026-10-01' }),
+      ]);
+    });
+  });
+
+  describe('findOne', () => {
     it('restricts a DRIVER to his own missions IN the query', async () => {
       await service.findOne(MISSION_ID, driver);
 

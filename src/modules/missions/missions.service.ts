@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { lockDriver } from '../drivers/driver-lock';
 import type { CreateMissionDto } from './dto/create-mission.dto';
+import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
 import {
@@ -91,6 +92,28 @@ export class MissionsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Liste filtrée d'un jour (aujourd'hui par défaut). Pour un chauffeur, la portée
+   * `visibleBy` est appliquée EN DERNIER : elle écrase tout `driverId` envoyé.
+   * Sans historique (pas de N+1) : il est dans le détail.
+   */
+  async findAll(
+    query: ListMissionsQueryDto,
+    viewer: TMissionViewer,
+  ): Promise<MissionResponseDto[]> {
+    const missions = await this.prisma.mission.findMany({
+      where: {
+        plannedDate: dateOnlyToDate(query.date ?? businessToday()),
+        ...(query.driverId !== undefined && { driverId: query.driverId }),
+        ...(query.status !== undefined && { status: query.status }),
+        ...visibleBy(viewer),
+      },
+      select: MISSION_RESPONSE_SELECT,
+      orderBy: [{ createdAt: 'asc' }, { reference: 'asc' }],
+    });
+    return missions.map(toMissionResponse);
   }
 
   /**

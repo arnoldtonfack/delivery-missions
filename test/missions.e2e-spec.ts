@@ -2,7 +2,11 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { hashPassword } from 'src/common/crypto/password.util';
-import { businessToday } from 'src/common/utils/business-date.util';
+import {
+  businessToday,
+  dateOnlyToDate,
+  dateToDateOnly,
+} from 'src/common/utils/business-date.util';
 import { PrismaService } from 'src/database/prisma.service';
 import { apiPath, createE2eApp } from './utils/create-e2e-app';
 
@@ -25,6 +29,7 @@ describe('Missions (e2e)', () => {
   let dispatcherId: string;
   let driverId: string;
   let inactiveDriverId: string;
+  let otherDriverId: string;
 
   const http = (): ReturnType<typeof request> => request(app.getHttpServer());
   const tokenFor = async (userEmail: string): Promise<string> => {
@@ -78,7 +83,7 @@ describe('Missions (e2e)', () => {
     dispatcherId = await createUser('dispatcher', 'DISPATCHER');
     driverId = await createUser('driver', 'DRIVER');
     inactiveDriverId = await createUser('inactive-driver', 'DRIVER', false);
-    await createUser('other-driver', 'DRIVER');
+    otherDriverId = await createUser('other-driver', 'DRIVER');
     dispatcherToken = await tokenFor(email('dispatcher'));
     driverToken = await tokenFor(email('driver'));
     otherDriverToken = await tokenFor(email('other-driver'));
@@ -168,6 +173,87 @@ describe('Missions (e2e)', () => {
       ).expect(403);
 
       expect(res.body).toMatchObject({ message: 'INSUFFICIENT_ROLE' });
+    });
+  });
+
+  describe('GET /missions', () => {
+    const tomorrow = dateToDateOnly(
+      new Date(dateOnlyToDate(businessToday()).getTime() + 86_400_000),
+    );
+    let todayMissionId: string;
+    let tomorrowMissionId: string;
+    let otherDriverMissionId: string;
+    const listMissions = (
+      token: string,
+      query: Record<string, string> = {},
+    ): request.Test =>
+      http()
+        .get(apiPath('missions'))
+        .query(query)
+        .set('Authorization', `Bearer ${token}`);
+    const idsOf = (res: request.Response): string[] =>
+      (res.body.data as { id: string }[]).map((m) => m.id);
+
+    beforeAll(async () => {
+      const today = await createMission(missionBody('list-today')).expect(201);
+      const later = await createMission(
+        missionBody('list-tomorrow', { plannedDate: tomorrow }),
+      ).expect(201);
+      const other = await createMission(
+        missionBody('list-other', { driverId: otherDriverId }),
+      ).expect(201);
+      todayMissionId = today.body.data.id as string;
+      tomorrowMissionId = later.body.data.id as string;
+      otherDriverMissionId = other.body.data.id as string;
+    });
+
+    it('driver without filter: only HIS missions of today', async () => {
+      const ids = idsOf(await listMissions(driverToken).expect(200));
+
+      expect(ids).toContain(todayMissionId);
+      expect(ids).not.toContain(tomorrowMissionId);
+      expect(ids).not.toContain(otherDriverMissionId);
+    });
+
+    it("driver asking for another driver's missions still gets only his own", async () => {
+      const res = await listMissions(driverToken, {
+        driverId: otherDriverId,
+      }).expect(200);
+
+      expect(idsOf(res)).not.toContain(otherDriverMissionId);
+      expect(
+        (res.body.data as { driver: { id: string } }[]).every(
+          (m) => m.driver.id === driverId,
+        ),
+      ).toBe(true);
+    });
+
+    it('dispatcher: filters by date, driver and status', async () => {
+      const byDriver = await listMissions(dispatcherToken, {
+        driverId: otherDriverId,
+      }).expect(200);
+      expect(idsOf(byDriver)).toEqual([otherDriverMissionId]);
+
+      const byDate = await listMissions(dispatcherToken, {
+        date: tomorrow,
+        driverId,
+        status: 'PLANNED',
+      }).expect(200);
+      expect(idsOf(byDate)).toEqual([tomorrowMissionId]);
+
+      const byStatus = await listMissions(dispatcherToken, {
+        driverId,
+        status: 'DELIVERED',
+      }).expect(200);
+      expect(idsOf(byStatus)).toEqual([]);
+    });
+
+    it.each([
+      ['an unknown status', { status: 'DONE' }],
+      ['an impossible date', { date: '2026-13-01' }],
+      ['a non-uuid driverId', { driverId: 'abc' }],
+    ])('400 on %s', async (_label, query) => {
+      await listMissions(dispatcherToken, query).expect(400);
     });
   });
 

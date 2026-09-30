@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -30,6 +31,7 @@ import {
   unauthorizedResponse,
 } from '../../common/swagger/api-error-responses';
 import { CreateMissionDto } from './dto/create-mission.dto';
+import { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import { MissionResponseDto } from './dto/mission-response.dto';
 import { MissionsService } from './missions.service';
@@ -71,6 +73,28 @@ export class MissionsController {
     @CurrentUser() user: IAuthenticatedUser,
   ): Promise<MissionResponseDto> {
     return this.missionsService.create(dto, user.id);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'Lister les missions d’un jour (filtres date, chauffeur, statut)',
+    description:
+      'Sans `date` : missions prévues aujourd’hui (fuseau Africa/Douala, horloge ' +
+      'serveur). Dispatcher : toutes, filtrables par `driverId` et `status`. ' +
+      'Chauffeur : uniquement les siennes — tout `driverId` envoyé est ignoré et ' +
+      'remplacé par le sien côté serveur. Sans historique (voir le détail).',
+  })
+  @ApiDataResponse(MissionResponseDto, { isArray: true })
+  @ApiBadRequestResponse(
+    badRequestResponse('Filtre invalide', [
+      'status must be one of the following values: PLANNED, STARTED, DELIVERED, FAILED',
+    ]),
+  )
+  findAll(
+    @Query() query: ListMissionsQueryDto,
+    @CurrentUser() user: IAuthenticatedUser,
+  ): Promise<MissionResponseDto[]> {
+    return this.missionsService.findAll(query, user);
   }
 
   @Get(':id')
