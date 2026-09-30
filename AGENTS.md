@@ -21,8 +21,13 @@ que si tout l'obligatoire marche.
 
 - Ce dépôt = **l'API uniquement** (code à la racine). Le front est construit ensuite, une
   fois l'API terminée et testée.
-- **API** : NestJS 11 (Express), TypeScript strict, Prisma 7 (adapter `pg`), PostgreSQL,
-  Redis (cache opt-in). Auth JWT + bcrypt.
+- **API** : NestJS 11 (Express), TypeScript strict, Prisma 7 (adapter `pg`), PostgreSQL.
+  Auth JWT (`@nestjs/jwt` **v11** : la v12 est ESM-only, incompatible avec notre build
+  CommonJS/Jest) + bcrypt via `bcryptjs` (pur JS, pas de module natif dans l'image Alpine).
+- **Redis** : présent (health check, BullMQ prêt) mais **aucune donnée métier** et jamais sur
+  le chemin des fonctionnalités obligatoires. Seul usage prévu : le bonus « notification au
+  chauffeur à l'assignation ». Ne PAS cacher le dashboard (invalidation risquée, GROUP BY
+  indexé déjà rapide).
 - Gestionnaire de paquets : **pnpm** uniquement (pas de npm/yarn pour installer).
 - Validation des entrées : class-validator + class-transformer, `ValidationPipe` global
   (`whitelist`, `forbidNonWhitelisted`). DTO obligatoire sur chaque endpoint.
@@ -66,6 +71,83 @@ que si tout l'obligatoire marche.
   pas de « Generated with … »). L'usage de l'IA est déclaré **uniquement dans le README**,
   section dédiée — c'est une exigence du règlement de l'épreuve.
 - Ne jamais committer de secrets (`.env*` sauf `.env.example`, jetons, mots de passe).
+
+## État et décisions (passage de relais entre sessions)
+
+Sujet original (captures) : `/home/lavega/Téléchargements/sujet/`. Ne pas stocker de travail
+dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
+
+### Fait (committé et poussé sur `origin/main`)
+
+1. Socle renommé `delivery-missions` ; `docker-compose.yml` (dev, projet `delivery-missions`)
+   et `docker-compose.prod.yml` (serveur partagé : seule l'API publiée, projet
+   `delivery-missions-demo`).
+2. Modèle : `User` (email unique, `passwordHash`, `fullName`, `role`, `isActive`),
+   `Mission` (`reference` unique, `customerName`, `pickupAddress`, `deliveryAddress`,
+   `plannedDate` DATE, `status`, `failureReason?`, `deliveryComment?`, `startedAt?`,
+   `completedAt?`, `version`, `driverId`, `createdById`), `MissionStatusHistory`
+   (`fromStatus?`, `toStatus`, `note?`, `actorId`, `createdAt`). Contraintes CHECK écrites à la
+   main dans la migration initiale (raison non vide si FAILED ; `startedAt`/`completedAt`
+   cohérents avec le statut ; `version >= 0`). Index : `(driverId, plannedDate, status)`,
+   `(plannedDate, status)`, `(missionId, createdAt)`.
+3. Auth (`src/modules/auth`) : `POST /auth/login` (**email** + mot de passe), `GET /auth/me`.
+   `JwtAuthGuard` global (`@Public()` pour les exceptions) qui **relit l'utilisateur en base**
+   à chaque requête (compte désactivé → 401 `ACCOUNT_DISABLED`). `RolesGuard` global +
+   `@Roles()`, `@CurrentUser()`. Codes : `INVALID_CREDENTIALS` (même réponse et même temps
+   pour e-mail inconnu), `ACCOUNT_DISABLED` (403 au login), `INSUFFICIENT_ROLE`,
+   `AUTH_TOKEN_MISSING`, `AUTH_TOKEN_INVALID`. Login limité à 10/min ; throttling désactivé
+   sous `NODE_ENV=test`.
+4. Chauffeurs (`src/modules/drivers`, DISPATCHER uniquement) : `POST /drivers`,
+   `GET /drivers?isActive=`, `GET /drivers/:id`, `PATCH /drivers/:id`,
+   `PATCH /drivers/:id/status`. Désactivation (jamais de suppression) refusée si missions
+   PLANNED/STARTED (`DRIVER_HAS_OPEN_MISSIONS`), sous verrou `SELECT … FOR UPDATE` sur la
+   ligne du chauffeur. Mot de passe 8 car. min, **72 octets max** (`@IsByteLength`, limite
+   bcrypt). DTO de mise à jour : `PartialType(..., { skipNullProperties: false })`.
+5. Transverse : `@NormalizeEmail()`, `@ApiDataResponse()` (Swagger de l'enveloppe réelle
+   `{ success, data, timestamp }`), `unauthorizedResponse`/`forbiddenResponse`,
+   `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests : 48 unitaires, 24 e2e.
+   Réutiliser `USER_RESPONSE_SELECT` / `toUserResponse` (`src/modules/users/user.mapper.ts`).
+
+### À faire, dans cet ordre (une micro-étape = code + tests + typecheck/lint/test/e2e/build + commit + push)
+
+1. **Missions** (`src/modules/missions`) : création, modification, liste filtrée, détail.
+2. **Transitions** : démarrer / livrer / échouer.
+3. **Dashboard** : nombre de missions par statut pour la journée.
+4. **Seed** idempotent : 1 dispatcher, 2 chauffeurs, missions datées relativement à
+   aujourd'hui dans tous les statuts ; comptes de test affichés dans le README.
+5. **README** : installation, comptes de test, choix justifiés (stack, modèle, hypothèses
+   métier ci-dessous), endpoints, fait / pas fait, améliorations, **section « Utilisation de
+   l'IA »** (obligatoire). Vérifier l'installation « à la jury » sur volume vierge.
+6. **Front** (dépôt séparé, après l'API) : écrans chauffeur mobile-first.
+
+### Décisions métier à appliquer (hypothèses à reprendre dans le README)
+
+- « Aujourd'hui » = date dans le fuseau **`Africa/Douala`**, calculée côté serveur (jamais
+  l'horloge du navigateur). Liste chauffeur sans filtre de date = missions du jour.
+- Un chauffeur ne voit que SES missions, quel que soit le filtre envoyé (filtre `driverId`
+  forcé côté serveur). Mission d'un autre chauffeur → **404 `MISSION_NOT_FOUND`** (pas 403 :
+  ne pas révéler son existence). Même règle pour le détail, l'historique et les actions.
+- Création et réassignation : le chauffeur doit être un `DRIVER` **actif**, vérifié sous le
+  même verrou `SELECT … FOR UPDATE` que la désactivation. Référence normalisée (trim +
+  majuscules), unique (`MISSION_REFERENCE_ALREADY_USED`).
+- La création écrit une entrée d'historique `null → PLANNED` (acteur = dispatcher).
+- Modification / réassignation par le dispatcher **uniquement si PLANNED** (sinon 409).
+  `DELIVERED` et `FAILED` sont terminaux ; une nouvelle tentative = une nouvelle mission.
+- Seul le **chauffeur assigné** fait les transitions. Statut + horodatage + historique dans
+  **une transaction**, écriture conditionnée par `version` (`updateMany where { id, version,
+  status }` → 0 ligne = 409 `MISSION_CONFLICT`) pour les doubles clics et la concurrence.
+- `FAILED` : raison obligatoire, non vide après trim. `DELIVERED` : commentaire optionnel,
+  `completedAt` = horodatage serveur.
+- Dashboard : missions **prévues aujourd'hui**, par statut actuel ; toutes pour le
+  dispatcher, uniquement les siennes pour un chauffeur.
+
+### Rappels
+
+- Dépôt GitHub **privé** (`arnoldtonfack/delivery-missions`) : le rendre public ou inviter
+  le jury à la fin — demander à l'utilisateur avant.
+- Pousser après chaque commit (le jury juge la régularité).
+- Montrer à l'utilisateur ce qui est fait à chaque micro-étape ; il fait relire le code par
+  Codex (ChatGPT) en lecture seule, les retours vérifiés sont corrigés par l'auteur.
 
 ## Collaboration entre agents
 
