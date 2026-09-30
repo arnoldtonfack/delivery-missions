@@ -33,6 +33,8 @@ import {
   unauthorizedResponse,
 } from '../../common/swagger/api-error-responses';
 import { CreateMissionDto } from './dto/create-mission.dto';
+import { DeliverMissionDto } from './dto/deliver-mission.dto';
+import { FailMissionDto } from './dto/fail-mission.dto';
 import { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import { MissionResponseDto } from './dto/mission-response.dto';
@@ -203,5 +205,83 @@ export class MissionsController {
     @CurrentUser() user: IAuthenticatedUser,
   ): Promise<MissionResponseDto> {
     return this.missionsService.start(id, user);
+  }
+
+  @Post(':id/deliver')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.DRIVER)
+  @ApiOperation({
+    summary: 'Marquer une mission livrée (STARTED → DELIVERED)',
+    description:
+      'Réservé au chauffeur ASSIGNÉ : un dispatcher reçoit 403, un autre chauffeur ' +
+      '404. Seule une mission STARTED peut être livrée (sinon 409 ' +
+      'INVALID_STATUS_TRANSITION). Commentaire optionnel (vide après trim = aucun), ' +
+      'repris dans l’historique. `completedAt` est l’horodatage serveur.',
+  })
+  @ApiDataResponse(MissionResponseDto)
+  @ApiBadRequestResponse(
+    badRequestResponse('Identifiant ou corps invalide', [
+      'comment must be shorter than or equal to 500 characters',
+    ]),
+  )
+  @ApiForbiddenResponse(forbiddenResponse('Réservé au rôle DRIVER'))
+  @ApiNotFoundResponse(
+    notFoundResponse(
+      'Mission introuvable ou assignée à un autre chauffeur',
+      'MISSION_NOT_FOUND',
+    ),
+  )
+  @ApiConflictResponse(
+    conflictResponse(
+      'Mission pas STARTED (INVALID_STATUS_TRANSITION) ou modifiée en même temps ' +
+        '(MISSION_CONFLICT)',
+      'INVALID_STATUS_TRANSITION',
+    ),
+  )
+  deliver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeliverMissionDto,
+    @CurrentUser() user: IAuthenticatedUser,
+  ): Promise<MissionResponseDto> {
+    return this.missionsService.deliver(id, dto, user);
+  }
+
+  @Post(':id/fail')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.DRIVER)
+  @ApiOperation({
+    summary: 'Marquer une mission en échec (STARTED → FAILED)',
+    description:
+      'Réservé au chauffeur ASSIGNÉ : un dispatcher reçoit 403, un autre chauffeur ' +
+      '404. Seule une mission STARTED peut échouer (sinon 409 ' +
+      'INVALID_STATUS_TRANSITION). Raison OBLIGATOIRE, non vide après trim (400), ' +
+      'reprise dans l’historique. `completedAt` est l’horodatage serveur.',
+  })
+  @ApiDataResponse(MissionResponseDto)
+  @ApiBadRequestResponse(
+    badRequestResponse('Identifiant invalide ou raison absente/vide', [
+      'reason should not be empty',
+    ]),
+  )
+  @ApiForbiddenResponse(forbiddenResponse('Réservé au rôle DRIVER'))
+  @ApiNotFoundResponse(
+    notFoundResponse(
+      'Mission introuvable ou assignée à un autre chauffeur',
+      'MISSION_NOT_FOUND',
+    ),
+  )
+  @ApiConflictResponse(
+    conflictResponse(
+      'Mission pas STARTED (INVALID_STATUS_TRANSITION) ou modifiée en même temps ' +
+        '(MISSION_CONFLICT)',
+      'INVALID_STATUS_TRANSITION',
+    ),
+  )
+  fail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FailMissionDto,
+    @CurrentUser() user: IAuthenticatedUser,
+  ): Promise<MissionResponseDto> {
+    return this.missionsService.fail(id, dto, user);
   }
 }

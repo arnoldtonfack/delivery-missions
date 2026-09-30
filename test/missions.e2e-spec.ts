@@ -523,4 +523,156 @@ describe('Missions (e2e)', () => {
       await startMission('not-a-uuid').expect(400);
     });
   });
+
+  describe('POST /missions/:id/deliver and /fail', () => {
+    const act = (
+      id: string,
+      action: 'start' | 'deliver' | 'fail',
+      body: Record<string, unknown> = {},
+      token = driverToken,
+    ): request.Test =>
+      http()
+        .post(apiPath(`missions/${id}/${action}`))
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    const startedMission = async (name: string): Promise<string> => {
+      const res = await createMission(missionBody(name)).expect(201);
+      const id = res.body.data.id as string;
+      await act(id, 'start').expect(200);
+      return id;
+    };
+    const historyOf = async (
+      id: string,
+    ): Promise<Record<string, unknown>[]> => {
+      const res = await http()
+        .get(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${dispatcherToken}`)
+        .expect(200);
+      return res.body.data.statusHistory as Record<string, unknown>[];
+    };
+
+    it('deliver: 200 DELIVERED, trimmed comment, completedAt set, full history PLANNED → STARTED → DELIVERED', async () => {
+      const id = await startedMission('deliver-ok');
+
+      const res = await act(id, 'deliver', {
+        comment: '  Remis au gérant ',
+      }).expect(200);
+
+      expect(res.body.data).toMatchObject({
+        status: 'DELIVERED',
+        deliveryComment: 'Remis au gérant',
+        failureReason: null,
+      });
+      expect(typeof res.body.data.completedAt).toBe('string');
+      expect(await historyOf(id)).toMatchObject([
+        { fromStatus: null, toStatus: 'PLANNED', note: null },
+        { fromStatus: 'PLANNED', toStatus: 'STARTED', note: null },
+        {
+          fromStatus: 'STARTED',
+          toStatus: 'DELIVERED',
+          note: 'Remis au gérant',
+          actor: { id: driverId },
+        },
+      ]);
+    });
+
+    it('deliver without body: 200, no comment', async () => {
+      const id = await startedMission('deliver-nobody');
+
+      const res = await http()
+        .post(apiPath(`missions/${id}/deliver`))
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+
+      expect(res.body.data).toMatchObject({
+        status: 'DELIVERED',
+        deliveryComment: null,
+      });
+    });
+
+    it('fail: 200 FAILED, trimmed reason in the mission and the history', async () => {
+      const id = await startedMission('fail-ok');
+
+      const res = await act(id, 'fail', { reason: ' Client absent ' }).expect(
+        200,
+      );
+
+      expect(res.body.data).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'Client absent',
+        deliveryComment: null,
+      });
+      expect(typeof res.body.data.completedAt).toBe('string');
+      expect((await historyOf(id)).at(-1)).toMatchObject({
+        fromStatus: 'STARTED',
+        toStatus: 'FAILED',
+        note: 'Client absent',
+      });
+    });
+
+    it.each([
+      ['no reason', 'none', {}],
+      ['a blank reason', 'blank', { reason: '   ' }],
+      ['a non-string reason', 'number', { reason: 42 }],
+    ])(
+      'fail with %s: 400, the mission stays STARTED',
+      async (_label, name, body) => {
+        const id = await startedMission(`fail-bad-${name}`);
+
+        await act(id, 'fail', body).expect(400);
+
+        const row = await prisma.mission.findUniqueOrThrow({ where: { id } });
+        expect(row.status).toBe('STARTED');
+      },
+    );
+
+    it('a PLANNED mission cannot be delivered nor failed directly (409 INVALID_STATUS_TRANSITION)', async () => {
+      const res = await createMission(missionBody('skip-start')).expect(201);
+      const id = res.body.data.id as string;
+
+      const delivered = await act(id, 'deliver').expect(409);
+      const failed = await act(id, 'fail', { reason: 'Panne' }).expect(409);
+
+      expect(delivered.body).toMatchObject({
+        message: 'INVALID_STATUS_TRANSITION',
+      });
+      expect(failed.body).toMatchObject({
+        message: 'INVALID_STATUS_TRANSITION',
+      });
+    });
+
+    it('DELIVERED is terminal: fail, deliver and start → 409', async () => {
+      const id = await startedMission('terminal');
+      await act(id, 'deliver').expect(200);
+
+      await act(id, 'fail', { reason: 'Trop tard' }).expect(409);
+      await act(id, 'deliver').expect(409);
+      await act(id, 'start').expect(409);
+    });
+
+    it('deliver and fail at the same time: exactly one wins, one history entry', async () => {
+      const id = await startedMission('deliver-fail-race');
+
+      const responses = await Promise.all([
+        act(id, 'deliver'),
+        act(id, 'fail', { reason: 'Panne' }),
+      ]);
+
+      expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+      const history = await historyOf(id);
+      expect(history).toHaveLength(3);
+    });
+
+    it('another driver: 404; the dispatcher: 403; an unknown field: 400', async () => {
+      const id = await startedMission('deliver-access');
+
+      await act(id, 'deliver', {}, otherDriverToken).expect(404);
+      await act(id, 'fail', { reason: 'X' }, otherDriverToken).expect(404);
+      await act(id, 'deliver', {}, dispatcherToken).expect(403);
+      await act(id, 'deliver', { status: 'FAILED' }).expect(400);
+
+      const row = await prisma.mission.findUniqueOrThrow({ where: { id } });
+      expect(row.status).toBe('STARTED');
+    });
+  });
 });

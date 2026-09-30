@@ -16,6 +16,8 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { DriversService } from '../drivers/drivers.service';
 import type { CreateMissionDto } from './dto/create-mission.dto';
+import type { DeliverMissionDto } from './dto/deliver-mission.dto';
+import type { FailMissionDto } from './dto/fail-mission.dto';
 import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
@@ -197,7 +199,33 @@ export class MissionsService {
 
   /** Le chauffeur assigné prend la route : PLANNED → STARTED. */
   start(id: string, actor: TMissionViewer): Promise<MissionResponseDto> {
-    return this.transition(id, actor, MissionStatus.STARTED);
+    return this.transition(id, actor, MissionStatus.STARTED, null);
+  }
+
+  /** STARTED → DELIVERED ; commentaire optionnel (vide après trim = aucun). */
+  deliver(
+    id: string,
+    dto: DeliverMissionDto,
+    actor: TMissionViewer,
+  ): Promise<MissionResponseDto> {
+    const comment = dto.comment?.trim() || null;
+    return this.transition(id, actor, MissionStatus.DELIVERED, comment);
+  }
+
+  /**
+   * STARTED → FAILED ; raison obligatoire. Le DTO la refuse déjà si vide après
+   * trim : ce contrôle protège un appel direct du service, avant toute requête.
+   */
+  async fail(
+    id: string,
+    dto: FailMissionDto,
+    actor: TMissionViewer,
+  ): Promise<MissionResponseDto> {
+    const reason = dto.reason.trim();
+    if (reason.length === 0) {
+      throw new BadRequestException('FAILURE_REASON_REQUIRED');
+    }
+    return this.transition(id, actor, MissionStatus.FAILED, reason);
   }
 
   /**
@@ -213,11 +241,15 @@ export class MissionsService {
    *    est conditionnée par la version ET le statut lus : si une autre requête a
    *    écrit entre la lecture et l'écriture, 0 ligne → 409 `MISSION_CONFLICT`,
    *    et rien n'est historisé.
+   *
+   * `note` (commentaire de livraison ou raison d'échec) est rangée dans la
+   * colonne de son statut ET dans l'historique. Jamais loggée.
    */
   private async transition(
     id: string,
     actor: TMissionViewer,
     to: MissionStatus,
+    note: string | null,
   ): Promise<MissionResponseDto> {
     if (actor.role !== Role.DRIVER) {
       throw new ForbiddenException('INSUFFICIENT_ROLE');
@@ -240,7 +272,7 @@ export class MissionsService {
         data: {
           status: to,
           version: { increment: 1 },
-          ...transitionTimestamps(to, now),
+          ...transitionFields(to, now, note),
         },
       });
       if (count === 0) {
@@ -252,6 +284,7 @@ export class MissionsService {
           missionId: id,
           fromStatus: current.status,
           toStatus: to,
+          note,
           actorId: actor.id,
           createdAt: now,
         },
@@ -292,19 +325,22 @@ const assertNotInPast = (plannedDate: string): void => {
 };
 
 /**
- * Horodatages du statut d'arrivée, cohérents avec les contraintes CHECK :
- * `startedAt` dès STARTED, `completedAt` sur un statut terminal.
+ * Colonnes propres au statut d'arrivée, cohérentes avec les contraintes CHECK :
+ * `startedAt` dès STARTED, `completedAt` sur un statut terminal, la note dans
+ * la colonne de son statut (commentaire de livraison ou raison d'échec).
  */
-const transitionTimestamps = (
+const transitionFields = (
   to: MissionStatus,
   now: Date,
+  note: string | null,
 ): Prisma.MissionUpdateManyMutationInput => {
   switch (to) {
     case MissionStatus.STARTED:
       return { startedAt: now };
     case MissionStatus.DELIVERED:
+      return { completedAt: now, deliveryComment: note };
     case MissionStatus.FAILED:
-      return { completedAt: now };
+      return { completedAt: now, failureReason: note };
     case MissionStatus.PLANNED:
       return {};
   }

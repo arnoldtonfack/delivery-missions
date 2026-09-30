@@ -443,6 +443,7 @@ describe('MissionsService', () => {
           missionId: MISSION_ID,
           fromStatus: 'PLANNED',
           toStatus: 'STARTED',
+          note: null,
           actorId: DRIVER_ID,
           createdAt: update.data.startedAt,
         },
@@ -489,6 +490,144 @@ describe('MissionsService', () => {
       await expect(service.start(MISSION_ID, driver)).rejects.toThrow(
         new ConflictException('MISSION_CONFLICT'),
       );
+      expect(prisma.missionStatusHistory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deliver / fail', () => {
+    type TUpdateCall = {
+      where: unknown;
+      data: Record<string, unknown> & { completedAt: Date };
+    };
+    const updateCall = (): TUpdateCall =>
+      prisma.mission.updateMany.mock.calls[0][0] as TUpdateCall;
+    const historyData = (): Record<string, unknown> =>
+      (
+        prisma.missionStatusHistory.create.mock.calls[0][0] as {
+          data: Record<string, unknown>;
+        }
+      ).data;
+
+    beforeEach(() => {
+      prisma.mission.findFirst.mockResolvedValue({
+        status: 'STARTED',
+        version: 1,
+      });
+    });
+
+    it('deliver: STARTED → DELIVERED, completedAt by the server, comment in the mission AND the history', async () => {
+      await service.deliver(MISSION_ID, { comment: 'Remis au gérant' }, driver);
+
+      const update = updateCall();
+      expect(update.where).toEqual({
+        id: MISSION_ID,
+        version: 1,
+        status: 'STARTED',
+      });
+      expect(update.data).toEqual({
+        status: 'DELIVERED',
+        version: { increment: 1 },
+        completedAt: expect.any(Date) as unknown,
+        deliveryComment: 'Remis au gérant',
+      });
+      expect(historyData()).toMatchObject({
+        fromStatus: 'STARTED',
+        toStatus: 'DELIVERED',
+        note: 'Remis au gérant',
+        actorId: DRIVER_ID,
+        createdAt: update.data.completedAt,
+      });
+    });
+
+    it.each([
+      ['absent', {}],
+      ['blank', { comment: '   ' }],
+    ])(
+      'deliver: %s comment → stored as null',
+      async (_label, dto: { comment?: string }) => {
+        await service.deliver(MISSION_ID, dto, driver);
+
+        expect(updateCall().data).toMatchObject({ deliveryComment: null });
+        expect(historyData()).toMatchObject({ note: null });
+      },
+    );
+
+    it('fail: STARTED → FAILED, trimmed reason in the mission AND the history, completedAt by the server', async () => {
+      await service.fail(MISSION_ID, { reason: '  Client absent ' }, driver);
+
+      expect(updateCall().data).toEqual({
+        status: 'FAILED',
+        version: { increment: 1 },
+        completedAt: expect.any(Date) as unknown,
+        failureReason: 'Client absent',
+      });
+      expect(historyData()).toMatchObject({
+        fromStatus: 'STARTED',
+        toStatus: 'FAILED',
+        note: 'Client absent',
+      });
+    });
+
+    it.each(['', '   '])(
+      'fail: reason %p → 400 FAILURE_REASON_REQUIRED, without touching the database',
+      async (reason) => {
+        await expect(
+          service.fail(MISSION_ID, { reason }, driver),
+        ).rejects.toThrow(new BadRequestException('FAILURE_REASON_REQUIRED'));
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['deliver', 'PLANNED'],
+      ['deliver', 'DELIVERED'],
+      ['deliver', 'FAILED'],
+      ['fail', 'PLANNED'],
+      ['fail', 'DELIVERED'],
+      ['fail', 'FAILED'],
+    ])(
+      '%s from %s → 409 INVALID_STATUS_TRANSITION, without writing',
+      async (action, status) => {
+        prisma.mission.findFirst.mockResolvedValue({ status, version: 1 });
+
+        const call =
+          action === 'deliver'
+            ? service.deliver(MISSION_ID, {}, driver)
+            : service.fail(MISSION_ID, { reason: 'Panne' }, driver);
+
+        await expect(call).rejects.toThrow(
+          new ConflictException('INVALID_STATUS_TRANSITION'),
+        );
+        expect(prisma.mission.updateMany).not.toHaveBeenCalled();
+        expect(prisma.missionStatusHistory.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('→ 403 for a DISPATCHER, 404 for another driver', async () => {
+      await expect(service.deliver(MISSION_ID, {}, dispatcher)).rejects.toThrow(
+        new ForbiddenException('INSUFFICIENT_ROLE'),
+      );
+      await expect(
+        service.fail(MISSION_ID, { reason: 'Panne' }, dispatcher),
+      ).rejects.toThrow(new ForbiddenException('INSUFFICIENT_ROLE'));
+
+      prisma.mission.findFirst.mockResolvedValue(null);
+      await expect(
+        service.fail(
+          MISSION_ID,
+          { reason: 'Panne' },
+          { id: OTHER_DRIVER, role: Role.DRIVER },
+        ),
+      ).rejects.toThrow(new NotFoundException('MISSION_NOT_FOUND'));
+      expect(prisma.mission.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('→ 409 MISSION_CONFLICT when delivered and failed at the same time (0 row updated)', async () => {
+      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.fail(MISSION_ID, { reason: 'Panne' }, driver),
+      ).rejects.toThrow(new ConflictException('MISSION_CONFLICT'));
       expect(prisma.missionStatusHistory.create).not.toHaveBeenCalled();
     });
   });
