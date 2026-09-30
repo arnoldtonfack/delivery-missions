@@ -10,6 +10,22 @@ Ce dépôt contient **l'API** (serveur). L'interface est dans un dépôt sépar�
 
 ---
 
+## Démo en ligne
+
+Déjà déployée, sans rien installer (comptes ci-dessous, [Comptes de test](#comptes-de-test)) :
+
+| URL | Contenu |
+| --- | --- |
+| http://livraison.69-251-219-67.sslip.io:5000 | **Console web** (dispatcher et chauffeur) |
+| http://69.251.219.67:4000/docs | **Swagger** de l'API |
+
+> Secours si le nom ne résout pas : http://69.251.219.67:5000.
+> Les missions de démonstration sont regénérées **chaque nuit** (00:10, heure de Douala) :
+> la journée en cours a toujours des missions dans les 4 statuts. Les actions faites la
+> veille sur ces missions sont remises à zéro.
+
+---
+
 ## Installation (jury)
 
 Prérequis : **Docker** (avec Compose) et `make`. Rien d'autre à installer sur la machine.
