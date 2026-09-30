@@ -4,6 +4,7 @@ const completeEnv = (): NodeJS.ProcessEnv => ({
   DATABASE_URL: 'postgresql://user:secret-password@localhost:5432/db',
   REDIS_HOST: 'localhost',
   REDIS_PORT: '6379',
+  JWT_SECRET: 'test-secret',
 });
 
 describe('validateRequiredEnv', () => {
@@ -35,6 +36,7 @@ describe('validateRequiredEnv', () => {
     expect(message).toContain('DATABASE_URL');
     expect(message).toContain('REDIS_HOST');
     expect(message).toContain('REDIS_PORT');
+    expect(message).toContain('JWT_SECRET');
   });
 
   it('requires CORS_ORIGIN in production only', () => {

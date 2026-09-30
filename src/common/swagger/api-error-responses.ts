@@ -23,6 +23,24 @@ export const badRequestResponse = (
   example: errorExample(400, 'Bad Request', exampleMessage),
 });
 
+/** 401 : jeton absent/invalide/expiré, identifiants invalides, compte désactivé. */
+export const unauthorizedResponse = (
+  description = 'Jeton absent, invalide ou expiré',
+  exampleCode = 'AUTH_TOKEN_INVALID',
+): ApiResponseOptions => ({
+  description,
+  example: errorExample(401, 'Unauthorized', exampleCode),
+});
+
+/** 403 : authentifié mais rôle ou état du compte insuffisant. */
+export const forbiddenResponse = (
+  description = 'Rôle insuffisant pour cette action',
+  exampleCode = 'INSUFFICIENT_ROLE',
+): ApiResponseOptions => ({
+  description,
+  example: errorExample(403, 'Forbidden', exampleCode),
+});
+
 /** 404 : ressource introuvable. */
 export const notFoundResponse = (
   description: string,

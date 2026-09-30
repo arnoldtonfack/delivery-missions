@@ -10,6 +10,9 @@ import { AppCacheModule } from './common/cache/cache.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { redisConfig } from './config/redis.config';
 import { HealthModule } from './health/health.module';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -38,33 +41,42 @@ import { HealthModule } from './health/health.module';
         },
       }),
     }),
-    ThrottlerModule.forRoot([
-      {
-        name: 'short',
-        ttl: 1_000,
-        limit: 10,
-      },
-      {
-        name: 'medium',
-        ttl: 60_000,
-        limit: 100,
-      },
-      {
-        name: 'hour',
-        ttl: 3_600_000,
-        limit: 1_000,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      // Désactivé sous Jest (NODE_ENV=test) : les e2e enchaînent des dizaines de
+      // requêtes par seconde depuis la même IP. Actif en dev et en production.
+      skipIf: () => process.env.NODE_ENV === 'test',
+      throttlers: [
+        {
+          name: 'short',
+          ttl: 1_000,
+          limit: 10,
+        },
+        {
+          name: 'medium',
+          ttl: 60_000,
+          limit: 100,
+        },
+        {
+          name: 'hour',
+          ttl: 3_600_000,
+          limit: 1_000,
+        },
+      ],
+    }),
     PrismaModule,
     RedisModule,
     AppCacheModule,
     HealthModule,
     // ── Modules métier (src/modules/<domaine>) ──
+    AuthModule,
   ],
   controllers: [],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    // Ordre d'exécution = ordre de déclaration : débit → authentification → rôle.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule {}

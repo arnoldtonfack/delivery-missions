@@ -1,19 +1,12 @@
-import {
-  INestApplication,
-  RequestMethod,
-  ValidationPipe,
-} from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 import { once } from 'events';
 import type Redis from 'ioredis';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { AppModule } from 'src/app.module';
 import { cacheKey } from 'src/common/cache/cache.keys';
 import { CacheService } from 'src/common/cache/cache.service';
-import { GLOBAL_PREFIX } from 'src/common/constants/api.constants';
-import { ResponseInterceptor } from 'src/common/interceptors/response.interceptor';
 import { REDIS_HEALTH } from 'src/health/redis-health.client';
+import { apiPath, createE2eApp } from './utils/create-e2e-app';
 
 /**
  * E2E contre une vraie base et un vrai Redis :
@@ -23,23 +16,7 @@ describe('App (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.useGlobalInterceptors(new ResponseInterceptor());
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
-    app.setGlobalPrefix(GLOBAL_PREFIX, {
-      exclude: [{ path: 'health', method: RequestMethod.GET }],
-    });
-    await app.init();
+    app = await createE2eApp();
 
     // Le client de sonde n'a pas de file hors-ligne (fail-fast) : on attend qu'il
     // soit connecté, sinon la toute première sonde échoue par construction.
@@ -62,7 +39,7 @@ describe('App (e2e)', () => {
 
   it('unknown route → 404 in the normalized error format', async () => {
     const res = await request(app.getHttpServer())
-      .get(`/${GLOBAL_PREFIX}/does-not-exist`)
+      .get(apiPath('does-not-exist'))
       .expect(404);
 
     expect(res.body).toMatchObject({ statusCode: 404, error: 'Not Found' });

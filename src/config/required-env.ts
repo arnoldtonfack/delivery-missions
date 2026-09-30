@@ -24,6 +24,7 @@ const REQUIRED_VARIABLES: readonly IRequiredVariable[] = [
   { name: 'DATABASE_URL', purpose: 'connexion PostgreSQL (PrismaService)' },
   { name: 'REDIS_HOST', purpose: 'hôte Redis (cache applicatif, BullMQ)' },
   { name: 'REDIS_PORT', purpose: 'port Redis (cache applicatif, BullMQ)' },
+  { name: 'JWT_SECRET', purpose: 'signature des jetons d’accès (AuthModule)' },
 ];
 
 /**
