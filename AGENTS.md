@@ -19,35 +19,28 @@ que si tout l'obligatoire marche.
 
 ## Stack
 
-- Monorepo : `api/` (backend) et `web/` (frontend), `docker-compose.yml` à la racine.
+- Ce dépôt = **l'API uniquement** (code à la racine). Le front est construit ensuite, une
+  fois l'API terminée et testée.
 - **API** : NestJS 11 (Express), TypeScript strict, Prisma 7 (adapter `pg`), PostgreSQL,
   Redis (cache opt-in). Auth JWT + bcrypt.
-- **Web** : Next.js (App Router), TypeScript strict.
 - Gestionnaire de paquets : **pnpm** uniquement (pas de npm/yarn pour installer).
 - Validation des entrées : class-validator + class-transformer, `ValidationPipe` global
   (`whitelist`, `forbidNonWhitelisted`). DTO obligatoire sur chaque endpoint.
 
-## Organisation du code (API)
+## Organisation du code
 
-- Modules métier dans `api/src/modules/<domaine>/` : `<domaine>.module.ts`,
+- Modules métier dans `src/modules/<domaine>/` : `<domaine>.module.ts`,
   `<domaine>.controller.ts` (routing uniquement), `<domaine>.service.ts` (logique métier +
   requêtes Prisma), `dto/`, `tests/`.
-- Transverse dans `api/src/common/` (filters, interceptors, decorators, guards, swagger…).
-- Schéma : `api/prisma/schema.prisma` ; migrations dans `api/src/database/migrations/`
-  (`pnpm prisma:migrate --name <nom>`) ; seed idempotent dans `api/scripts/seed.ts`.
+- Transverse dans `src/common/` (filters, interceptors, decorators, guards, swagger…).
+- Schéma : `prisma/schema.prisma` ; migrations dans `src/database/migrations/`
+  (`pnpm prisma:migrate --name <nom>`) ; seed idempotent dans `scripts/seed.ts`.
 - Erreurs : exceptions NestJS avec un **code métier** en message (`MISSION_NOT_FOUND`,
   `INVALID_STATUS_TRANSITION`…), jamais un message interne.
 - Swagger sur chaque endpoint : `@ApiOperation`, `*ResponseDto` typé, erreurs via
   `common/swagger/api-error-responses.ts`. Jamais de modèle Prisma brut ni de hash renvoyé.
 - Le détail des standards backend est dans `CLAUDE.md` ; suivre le style du module voisin
   le plus proche plutôt qu'inventer une nouvelle structure.
-
-## Organisation du code (Web)
-
-- Un seul client HTTP (`web/src/lib/api.ts`) : URL de l'API via `NEXT_PUBLIC_API_URL`,
-  jeton JWT joint, erreurs `{ statusCode, message, error }` traduites en message lisible.
-- Chaque écran gère explicitement : chargement, erreurs de formulaire, erreurs serveur.
-- Écrans chauffeur pensés mobile (gros boutons, retour clair après chaque action).
 
 ## Style
 
@@ -57,10 +50,10 @@ que si tout l'obligatoire marche.
 
 ## Tests
 
-- Unitaires (Jest) : `api/src/modules/<domaine>/tests/*.spec.ts`, dépendances mockées,
+- Unitaires (Jest) : `src/modules/<domaine>/tests/*.spec.ts`, dépendances mockées,
   `pnpm test`. Minimum exigé par l'épreuve : 3 ; cibler en priorité la machine à états,
   le contrôle d'accès et l'authentification.
-- E2E : `api/test/**/*.e2e-spec.ts`, `pnpm test:e2e`, contre la vraie infra (`make infra`).
+- E2E : `test/**/*.e2e-spec.ts`, `pnpm test:e2e`, contre la vraie infra (`make infra`).
 - Toute nouvelle fonctionnalité ou correction s'accompagne d'un test qui la couvre.
 
 ## Git
