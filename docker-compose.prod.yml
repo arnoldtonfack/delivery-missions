@@ -11,6 +11,9 @@
 #   stacks du serveur. Pas de `container_name` en dur pour la même raison.
 # - Mots de passe et port obligatoires (`:?`) : pas de défaut faible silencieux.
 # - Mémoire plafonnée et logs tournants pour ne pas pénaliser les voisins.
+# - Sous-réseau Docker fixé par DOCKER_SUBNET (pools par défaut épuisés sur un
+#   serveur partagé). Vérifier qu'il est libre :
+#   docker network inspect $(docker network ls -q) --format "{{.Name}} {{range .IPAM.Config}}{{.Subnet}}{{end}}"
 
 name: delivery-missions-demo
 
@@ -121,3 +124,8 @@ volumes:
 networks:
   internal:
     driver: bridge
+    # Sous-réseau explicite : sur un serveur chargé, les pools par défaut de Docker
+    # sont épuisés (« all predefined address pools have been fully subnetted »).
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:?DOCKER_SUBNET requis (sous-réseau libre, ex. 172.16.78.0/24)}
