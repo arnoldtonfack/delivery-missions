@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AuthModule } from './modules/auth/auth.module';
+import { DriversModule } from './modules/drivers/drivers.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AuthModule } from './modules/auth/auth.module';
     HealthModule,
     // ── Modules métier (src/modules/<domaine>) ──
     AuthModule,
+    DriversModule,
   ],
   controllers: [],
   providers: [

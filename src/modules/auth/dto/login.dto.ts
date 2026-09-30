@@ -1,13 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { NormalizeEmail } from '../../../common/transformers/normalize-email.transform';
 
 export class LoginDto {
-  /** Normalisé (trim + minuscules) : `Jean@Demo.cm ` et `jean@demo.cm` désignent le même compte. */
   @ApiProperty({ example: 'dispatcher@delivery.cm' })
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
-  )
+  @NormalizeEmail()
   @IsEmail()
   @MaxLength(254)
   readonly email: string;
