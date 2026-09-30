@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(docker volume *)",
+      "Bash(PORT=3100 docker compose -f docker-compose.prod.yml up -d --build)",
+      "Bash(PORT=3100 docker compose -f docker-compose.prod.yml ps -a --format '{{.Name}}\\\\t{{.Status}}\\\\t{{.Ports}}')",
+      "Bash(curl -sS -w '\\\\nHTTP %{http_code}\\\\n' http://localhost:3100/health)",
+      "Bash(make infra *)",
+      "Bash(pnpm -s typecheck)",
+      "Bash(pnpm -s exec eslint \"{src,test,scripts}/**/*.ts\")",
+      "Bash(pnpm -s test)",
+      "Bash(pnpm -s build)",
+      "Bash(pnpm -s test:e2e)",
+      "Bash(PORT=3100 docker compose -f docker-compose.prod.yml config -q)"
+    ]
+  }
+}

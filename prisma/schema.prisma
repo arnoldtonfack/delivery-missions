@@ -1,0 +1,16 @@
+// Schéma Prisma — aucun modèle métier : les modèles seront ajoutés selon le sujet.
+// Après modification : `pnpm prisma:migrate --name <nom>` (crée + applique la migration
+// dans src/database/migrations, puis régénère le client dans generated/prisma).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+// ─── Models ──────────────────────────────────────────────────────────────────

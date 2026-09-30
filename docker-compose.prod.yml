@@ -1,0 +1,123 @@
+# Déploiement sur un serveur PARTAGÉ (démo) — fichier autonome, pas un override.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Différences avec docker-compose.yml :
+# - Seule l'API est publiée. Postgres et Redis n'ont AUCUN `ports:` : ils ne sont
+#   joignables que via le réseau interne du projet. (Un override ne peut pas retirer
+#   les `ports` du fichier de base — Compose les fusionne — d'où un fichier séparé.)
+# - `name:` isole le projet : conteneurs `delivery-missions-demo-*`, volumes
+#   `delivery-missions-demo_*`, réseau `delivery-missions-demo_*` → aucune collision avec les autres
+#   stacks du serveur. Pas de `container_name` en dur pour la même raison.
+# - Mots de passe et port obligatoires (`:?`) : pas de défaut faible silencieux.
+# - Mémoire plafonnée et logs tournants pour ne pas pénaliser les voisins.
+
+name: delivery-missions-demo
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-database-url: &database-url postgresql://${DB_USER:?DB_USER requis}:${DB_PASSWORD:?DB_PASSWORD requis}@postgres:5432/${DB_NAME:?DB_NAME requis}?schema=public
+
+services:
+  # ── Application (seul service publié) ───────────────────────────────────────
+  app:
+    image: delivery-missions-demo-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    ports:
+      - "${PORT:?PORT requis (port publié sur l'hôte)}:3000"
+    env_file:
+      - .env
+    # Surcharge les valeurs « hôte » de .env (cf. docker-compose.yml).
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: *database-url
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 512m
+    logging: *logging
+    networks:
+      - internal
+
+  # ── Prisma migrate (one-shot) ───────────────────────────────────────────────
+  migrate:
+    image: delivery-missions-demo-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command: ["npx", "--no-install", "prisma", "migrate", "deploy"]
+    logging: *logging
+    networks:
+      - internal
+
+  # ── PostgreSQL (interne uniquement) ─────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    logging: *logging
+    networks:
+      - internal
+
+  # ── Redis (interne uniquement) ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD requis}
+      --maxmemory ${REDIS_MAX_MEMORY:-128mb}
+      --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # > REDIS_MAX_MEMORY (256mb dans .env.example) pour laisser de la marge au process.
+    mem_limit: 384m
+    logging: *logging
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  internal:
+    driver: bridge

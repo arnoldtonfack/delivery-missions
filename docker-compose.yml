@@ -1,0 +1,108 @@
+name: delivery-missions
+
+services:
+  # ── Application ─────────────────────────────────────────────────────────────
+  app:
+    image: delivery-missions-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: delivery_missions_app
+    restart: unless-stopped
+    ports:
+      - "${PORT}:3000"
+    env_file:
+      - .env
+    # NOT duplicates — these intentionally OVERRIDE the host-oriented values in
+    # .env. The .env targets host execution (`pnpm dev`, infra reachable on
+    # localhost:<published-port>); inside the compose network the app must reach
+    # services by their DNS name. Compose gives `environment:` precedence over
+    # `env_file:`, so one .env serves both workflows. Do not remove.
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery_missions_network
+
+  # ── Prisma migrate (one-shot) ───────────────────────────────────────────────
+  migrate:
+    image: delivery-missions-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: delivery_missions_migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - delivery_missions_network
+    restart: "no"
+    command: ["npx", "--no-install", "prisma", "migrate", "deploy"]
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: delivery_missions_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - delivery_missions_network
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  # `noeviction` : requis par BullMQ (une clé de job évincée = job perdu). Le cache
+  # applicatif pose toujours un TTL, il ne remplit donc pas la mémoire indéfiniment.
+  redis:
+    image: redis:7-alpine
+    container_name: delivery_missions_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory ${REDIS_MAX_MEMORY}
+      --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - delivery_missions_network
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+
+# ── Network ──────────────────────────────────────────────────────────────────
+networks:
+  delivery_missions_network:
+    driver: bridge
