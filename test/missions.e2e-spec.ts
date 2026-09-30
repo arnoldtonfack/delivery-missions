@@ -21,6 +21,7 @@ describe('Missions (e2e)', () => {
   let prisma: PrismaService;
   let dispatcherToken: string;
   let driverToken: string;
+  let otherDriverToken: string;
   let dispatcherId: string;
   let driverId: string;
   let inactiveDriverId: string;
@@ -77,8 +78,10 @@ describe('Missions (e2e)', () => {
     dispatcherId = await createUser('dispatcher', 'DISPATCHER');
     driverId = await createUser('driver', 'DRIVER');
     inactiveDriverId = await createUser('inactive-driver', 'DRIVER', false);
+    await createUser('other-driver', 'DRIVER');
     dispatcherToken = await tokenFor(email('dispatcher'));
     driverToken = await tokenFor(email('driver'));
+    otherDriverToken = await tokenFor(email('other-driver'));
   });
 
   afterAll(async () => {
@@ -165,6 +168,56 @@ describe('Missions (e2e)', () => {
       ).expect(403);
 
       expect(res.body).toMatchObject({ message: 'INSUFFICIENT_ROLE' });
+    });
+  });
+
+  describe('GET /missions/:id', () => {
+    let missionId: string;
+    const getMission = (id: string, token: string): request.Test =>
+      http()
+        .get(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      const res = await createMission(missionBody('detail')).expect(201);
+      missionId = res.body.data.id as string;
+    });
+
+    it('dispatcher: 200 with the history (who, when)', async () => {
+      const res = await getMission(missionId, dispatcherToken).expect(200);
+
+      expect(res.body.data).toMatchObject({
+        id: missionId,
+        reference: reference('detail'),
+        statusHistory: [
+          {
+            fromStatus: null,
+            toStatus: 'PLANNED',
+            note: null,
+            actor: { id: dispatcherId, fullName: 'E2E dispatcher' },
+          },
+        ],
+      });
+      expect(typeof res.body.data.statusHistory[0].createdAt).toBe('string');
+    });
+
+    it('assigned driver: 200', async () => {
+      await getMission(missionId, driverToken).expect(200);
+    });
+
+    it("another driver: 404 MISSION_NOT_FOUND, same as a mission that doesn't exist", async () => {
+      const foreign = await getMission(missionId, otherDriverToken).expect(404);
+      const missing = await getMission(
+        '00000000-0000-4000-8000-000000000000',
+        dispatcherToken,
+      ).expect(404);
+
+      expect(foreign.body).toMatchObject({ message: 'MISSION_NOT_FOUND' });
+      expect(foreign.body).toEqual(missing.body);
+    });
+
+    it('400 for a non-uuid id', async () => {
+      await getMission('not-a-uuid', dispatcherToken).expect(400);
     });
   });
 });

@@ -3,8 +3,10 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
-import { MissionStatus, Prisma } from '../../../generated/prisma/client';
+import { MissionStatus, Prisma, Role } from '../../../generated/prisma/client';
+import type { IAuthenticatedUser } from '../../common/guards/authenticated-request';
 import {
   businessToday,
   dateOnlyToDate,
@@ -12,8 +14,26 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { lockDriver } from '../drivers/driver-lock';
 import type { CreateMissionDto } from './dto/create-mission.dto';
+import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
-import { MISSION_RESPONSE_SELECT, toMissionResponse } from './mission.mapper';
+import {
+  MISSION_DETAIL_SELECT,
+  MISSION_RESPONSE_SELECT,
+  toMissionDetailResponse,
+  toMissionResponse,
+} from './mission.mapper';
+
+/** Ce dont le contrôle d'accès a besoin sur l'appelant. */
+export type TMissionViewer = Pick<IAuthenticatedUser, 'id' | 'role'>;
+
+/**
+ * Missions visibles par l'appelant, à combiner dans chaque `where` : tout pour
+ * le dispatcher, uniquement les siennes pour un chauffeur. Le filtre est dans la
+ * REQUÊTE (pas un contrôle après lecture) : la mission d'un autre chauffeur est
+ * introuvable, exactement comme une mission inexistante.
+ */
+const visibleBy = (viewer: TMissionViewer): Prisma.MissionWhereInput =>
+  viewer.role === Role.DRIVER ? { driverId: viewer.id } : {};
 
 /**
  * Missions de livraison. Le contrôle de PROPRIÉTÉ (un chauffeur ne voit et ne
@@ -71,6 +91,24 @@ export class MissionsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Détail + historique. Mission d'un autre chauffeur → 404 (pas 403) : ne pas
+   * révéler qu'elle existe.
+   */
+  async findOne(
+    id: string,
+    viewer: TMissionViewer,
+  ): Promise<MissionDetailResponseDto> {
+    const mission = await this.prisma.mission.findFirst({
+      where: { id, ...visibleBy(viewer) },
+      select: MISSION_DETAIL_SELECT,
+    });
+    if (!mission) {
+      throw new NotFoundException('MISSION_NOT_FOUND');
+    }
+    return toMissionDetailResponse(mission);
   }
 
   /**

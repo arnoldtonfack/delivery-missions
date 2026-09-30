@@ -1,9 +1,18 @@
-import { Body, Controller, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -17,9 +26,11 @@ import {
   badRequestResponse,
   conflictResponse,
   forbiddenResponse,
+  notFoundResponse,
   unauthorizedResponse,
 } from '../../common/swagger/api-error-responses';
 import { CreateMissionDto } from './dto/create-mission.dto';
+import { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import { MissionResponseDto } from './dto/mission-response.dto';
 import { MissionsService } from './missions.service';
 
@@ -32,7 +43,14 @@ export class MissionsController {
 
   @Post()
   @Roles(Role.DISPATCHER)
-  @ApiOperation({ summary: 'Créer une mission et l’assigner à un chauffeur' })
+  @ApiOperation({
+    summary: 'Créer une mission et l’assigner à un chauffeur',
+    description:
+      'La mission naît PLANNED. Le chauffeur doit être un DRIVER actif ; la date ' +
+      'prévue est aujourd’hui ou plus tard (fuseau Africa/Douala). La référence est ' +
+      'normalisée (trim + majuscules) et unique. Une première entrée d’historique ' +
+      '`null → PLANNED` est écrite avec le dispatcher pour auteur.',
+  })
   @ApiDataResponse(MissionResponseDto, { status: HttpStatus.CREATED })
   @ApiBadRequestResponse(
     badRequestResponse(
@@ -53,5 +71,34 @@ export class MissionsController {
     @CurrentUser() user: IAuthenticatedUser,
   ): Promise<MissionResponseDto> {
     return this.missionsService.create(dto, user.id);
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Détail d’une mission avec l’historique des statuts',
+    description:
+      'Dispatcher : toute mission. Chauffeur : uniquement une mission qui lui est ' +
+      'assignée ; celle d’un autre chauffeur renvoie 404, comme une mission ' +
+      'inexistante, pour ne pas révéler son existence. Historique du plus ancien au ' +
+      'plus récent (de → vers, auteur, date).',
+  })
+  @ApiDataResponse(MissionDetailResponseDto)
+  @ApiBadRequestResponse(
+    badRequestResponse(
+      'Identifiant invalide',
+      'Validation failed (uuid is expected)',
+    ),
+  )
+  @ApiNotFoundResponse(
+    notFoundResponse(
+      'Mission introuvable ou assignée à un autre chauffeur',
+      'MISSION_NOT_FOUND',
+    ),
+  )
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: IAuthenticatedUser,
+  ): Promise<MissionDetailResponseDto> {
+    return this.missionsService.findOne(id, user);
   }
 }

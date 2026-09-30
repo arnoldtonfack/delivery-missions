@@ -1,6 +1,10 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { Prisma } from '../../../../generated/prisma/client';
+import { Prisma, Role } from '../../../../generated/prisma/client';
 import { businessToday } from '../../../common/utils/business-date.util';
 import { PrismaService } from '../../../database/prisma.service';
 import type { CreateMissionDto } from '../dto/create-mission.dto';
@@ -45,14 +49,30 @@ const createDto = (
 describe('MissionsService', () => {
   let service: MissionsService;
   let prisma: {
-    mission: { create: jest.Mock };
+    mission: { create: jest.Mock; findFirst: jest.Mock };
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
   };
 
   beforeEach(async () => {
     prisma = {
-      mission: { create: jest.fn().mockResolvedValue(missionRow()) },
+      mission: {
+        create: jest.fn().mockResolvedValue(missionRow()),
+        findFirst: jest.fn().mockResolvedValue(
+          missionRow({
+            statusHistory: [
+              {
+                id: 'h1',
+                fromStatus: null,
+                toStatus: 'PLANNED',
+                note: null,
+                createdAt: new Date('2026-09-30T08:00:00Z'),
+                actor: { id: DISPATCHER_ID, fullName: 'Awa Dispatch' },
+              },
+            ],
+          }),
+        ),
+      },
       // Verrou `SELECT … FOR UPDATE` du chauffeur.
       $queryRaw: jest
         .fn()
@@ -140,6 +160,52 @@ describe('MissionsService', () => {
       await expect(service.create(createDto(), DISPATCHER_ID)).rejects.toThrow(
         new ConflictException('MISSION_REFERENCE_ALREADY_USED'),
       );
+    });
+  });
+
+  describe('findOne', () => {
+    const dispatcher = { id: DISPATCHER_ID, role: Role.DISPATCHER };
+    const driver = { id: DRIVER_ID, role: Role.DRIVER };
+
+    it('restricts a DRIVER to his own missions IN the query', async () => {
+      await service.findOne(MISSION_ID, driver);
+
+      expect(prisma.mission.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: MISSION_ID, driverId: DRIVER_ID },
+        }),
+      );
+    });
+
+    it('lets the DISPATCHER read any mission', async () => {
+      await service.findOne(MISSION_ID, dispatcher);
+
+      expect(prisma.mission.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: MISSION_ID } }),
+      );
+    });
+
+    it("→ 404 MISSION_NOT_FOUND for another driver's mission (existence not revealed)", async () => {
+      prisma.mission.findFirst.mockResolvedValue(null);
+
+      await expect(service.findOne(MISSION_ID, driver)).rejects.toThrow(
+        new NotFoundException('MISSION_NOT_FOUND'),
+      );
+    });
+
+    it('returns the status history with its author', async () => {
+      const result = await service.findOne(MISSION_ID, dispatcher);
+
+      expect(result.statusHistory).toEqual([
+        {
+          id: 'h1',
+          fromStatus: null,
+          toStatus: 'PLANNED',
+          note: null,
+          actor: { id: DISPATCHER_ID, fullName: 'Awa Dispatch' },
+          createdAt: new Date('2026-09-30T08:00:00Z'),
+        },
+      ]);
     });
   });
 });
