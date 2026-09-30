@@ -105,7 +105,7 @@ dans le scratchpad `/tmp/...` : il a déjà été vidé en cours de session.
    bcrypt). DTO de mise à jour : `PartialType(..., { skipNullProperties: false })`.
 5. Transverse : `@NormalizeEmail()`, `@ApiDataResponse()` (Swagger de l'enveloppe réelle
    `{ success, data, timestamp }`), `unauthorizedResponse`/`forbiddenResponse`,
-   `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests : 48 unitaires, 24 e2e.
+   `test/utils/create-e2e-app.ts` (+ `apiPath()`). Tests (après le module missions) : 73 unitaires, 54 e2e.
    Réutiliser `USER_RESPONSE_SELECT` / `toUserResponse` (`src/modules/users/user.mapper.ts`).
 6. Missions : `POST /missions` (DISPATCHER), `GET /missions?date&driverId&status`
    (un jour, aujourd'hui par défaut, sans historique), `GET /missions/:id` (détail +
