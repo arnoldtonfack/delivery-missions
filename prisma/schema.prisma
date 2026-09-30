@@ -35,8 +35,8 @@ enum MissionStatus {
 /// Jamais supprimé physiquement (historique conservé) : désactivé via `isActive`.
 model User {
   id           String   @id @default(uuid()) @db.Uuid
-  /// Identifiant de connexion, normalisé en minuscules par l'API.
-  login        String   @unique
+  /// Identifiant de connexion, normalisé (trim + minuscules) par l'API.
+  email        String   @unique
   passwordHash String
   fullName     String
   role         Role
