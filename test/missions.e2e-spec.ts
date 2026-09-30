@@ -426,4 +426,101 @@ describe('Missions (e2e)', () => {
       await patchMission(id, { customerName: 'X' }, driverToken).expect(403);
     });
   });
+
+  describe('POST /missions/:id/start', () => {
+    const startMission = (id: string, token = driverToken): request.Test =>
+      http()
+        .post(apiPath(`missions/${id}/start`))
+        .set('Authorization', `Bearer ${token}`);
+    const newMission = async (name: string): Promise<string> => {
+      const res = await createMission(missionBody(name)).expect(201);
+      return res.body.data.id as string;
+    };
+
+    it('assigned driver: 200 STARTED, startedAt set by the server, history PLANNED → STARTED by the driver', async () => {
+      const id = await newMission('start-ok');
+      const before = Date.now();
+
+      const res = await startMission(id).expect(200);
+
+      expect(res.body.data).toMatchObject({
+        id,
+        status: 'STARTED',
+        completedAt: null,
+      });
+      const startedAt = Date.parse(res.body.data.startedAt as string);
+      expect(startedAt).toBeGreaterThanOrEqual(before - 1000);
+      expect(startedAt).toBeLessThanOrEqual(Date.now() + 1000);
+
+      const detail = await http()
+        .get(apiPath(`missions/${id}`))
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+      expect(detail.body.data.statusHistory).toMatchObject([
+        { fromStatus: null, toStatus: 'PLANNED' },
+        {
+          fromStatus: 'PLANNED',
+          toStatus: 'STARTED',
+          actor: { id: driverId },
+        },
+      ]);
+      const row = await prisma.mission.findUniqueOrThrow({ where: { id } });
+      expect(row.version).toBe(1);
+    });
+
+    it('double click: the second start → 409 INVALID_STATUS_TRANSITION, history written once', async () => {
+      const id = await newMission('start-twice');
+      await startMission(id).expect(200);
+
+      const res = await startMission(id).expect(409);
+
+      expect(res.body).toMatchObject({ message: 'INVALID_STATUS_TRANSITION' });
+      await expect(
+        prisma.missionStatusHistory.count({
+          where: { missionId: id, toStatus: 'STARTED' },
+        }),
+      ).resolves.toBe(1);
+    });
+
+    it('two simultaneous starts: exactly one succeeds, the other gets 409', async () => {
+      const id = await newMission('start-race');
+
+      const responses = await Promise.all([
+        startMission(id),
+        startMission(id),
+        startMission(id),
+      ]);
+
+      const statuses = responses.map((r) => r.status).sort();
+      expect(statuses).toEqual([200, 409, 409]);
+      await expect(
+        prisma.missionStatusHistory.count({
+          where: { missionId: id, toStatus: 'STARTED' },
+        }),
+      ).resolves.toBe(1);
+    });
+
+    it('another driver: 404 MISSION_NOT_FOUND, the mission stays PLANNED', async () => {
+      const id = await newMission('start-foreign');
+
+      const res = await startMission(id, otherDriverToken).expect(404);
+
+      expect(res.body).toMatchObject({ message: 'MISSION_NOT_FOUND' });
+      const row = await prisma.mission.findUniqueOrThrow({ where: { id } });
+      expect(row.status).toBe('PLANNED');
+    });
+
+    it('403 INSUFFICIENT_ROLE for the dispatcher', async () => {
+      const id = await newMission('start-dispatcher');
+
+      const res = await startMission(id, dispatcherToken).expect(403);
+
+      expect(res.body).toMatchObject({ message: 'INSUFFICIENT_ROLE' });
+    });
+
+    it('404 on an unknown mission, 400 on a non-uuid id', async () => {
+      await startMission('00000000-0000-4000-8000-000000000000').expect(404);
+      await startMission('not-a-uuid').expect(400);
+    });
+  });
 });

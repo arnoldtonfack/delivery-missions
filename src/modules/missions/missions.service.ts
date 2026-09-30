@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,6 +20,7 @@ import type { ListMissionsQueryDto } from './dto/list-missions-query.dto';
 import type { MissionDetailResponseDto } from './dto/mission-detail-response.dto';
 import type { MissionResponseDto } from './dto/mission-response.dto';
 import type { UpdateMissionDto } from './dto/update-mission.dto';
+import { canTransition } from './mission-status.machine';
 import {
   MISSION_DETAIL_SELECT,
   MISSION_RESPONSE_SELECT,
@@ -193,6 +195,76 @@ export class MissionsService {
     return toMissionDetailResponse(mission);
   }
 
+  /** Le chauffeur assigné prend la route : PLANNED → STARTED. */
+  start(id: string, actor: TMissionViewer): Promise<MissionResponseDto> {
+    return this.transition(id, actor, MissionStatus.STARTED);
+  }
+
+  /**
+   * Mécanique commune des changements de statut.
+   *
+   * 1. Seul le chauffeur ASSIGNÉ agit : un dispatcher est refusé (403) ici aussi,
+   *    pas seulement par `@Roles()` ; un autre chauffeur ne trouve pas la
+   *    mission (404, portée `visibleBy` dans la requête).
+   * 2. La transition doit être autorisée par la machine à états, sinon 409
+   *    `INVALID_STATUS_TRANSITION` (double clic : la 2e requête lit déjà le
+   *    nouveau statut).
+   * 3. Statut + horodatage serveur + historique dans UNE transaction. L'écriture
+   *    est conditionnée par la version ET le statut lus : si une autre requête a
+   *    écrit entre la lecture et l'écriture, 0 ligne → 409 `MISSION_CONFLICT`,
+   *    et rien n'est historisé.
+   */
+  private async transition(
+    id: string,
+    actor: TMissionViewer,
+    to: MissionStatus,
+  ): Promise<MissionResponseDto> {
+    if (actor.role !== Role.DRIVER) {
+      throw new ForbiddenException('INSUFFICIENT_ROLE');
+    }
+    const mission = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.mission.findFirst({
+        where: { id, ...visibleBy(actor) },
+        select: { status: true, version: true },
+      });
+      if (!current) {
+        throw new NotFoundException('MISSION_NOT_FOUND');
+      }
+      if (!canTransition(current.status, to)) {
+        throw new ConflictException('INVALID_STATUS_TRANSITION');
+      }
+
+      const now = new Date();
+      const { count } = await tx.mission.updateMany({
+        where: { id, version: current.version, status: current.status },
+        data: {
+          status: to,
+          version: { increment: 1 },
+          ...transitionTimestamps(to, now),
+        },
+      });
+      if (count === 0) {
+        throw new ConflictException('MISSION_CONFLICT');
+      }
+
+      await tx.missionStatusHistory.create({
+        data: {
+          missionId: id,
+          fromStatus: current.status,
+          toStatus: to,
+          actorId: actor.id,
+          createdAt: now,
+        },
+      });
+      return tx.mission.findUniqueOrThrow({
+        where: { id },
+        select: MISSION_RESPONSE_SELECT,
+      });
+    });
+    this.logger.log(`Mission ${id} : ${to}`);
+    return toMissionResponse(mission);
+  }
+
   /**
    * Le chauffeur doit exister et être actif. Sa ligne reste verrouillée jusqu'à
    * la fin de `tx` : il ne peut pas être désactivé entre ce contrôle et l'écriture.
@@ -216,6 +288,25 @@ const assertNotInPast = (plannedDate: string): void => {
   // Comparaison lexicographique valide : les deux sont au format YYYY-MM-DD.
   if (plannedDate < businessToday()) {
     throw new BadRequestException('PLANNED_DATE_IN_PAST');
+  }
+};
+
+/**
+ * Horodatages du statut d'arrivée, cohérents avec les contraintes CHECK :
+ * `startedAt` dès STARTED, `completedAt` sur un statut terminal.
+ */
+const transitionTimestamps = (
+  to: MissionStatus,
+  now: Date,
+): Prisma.MissionUpdateManyMutationInput => {
+  switch (to) {
+    case MissionStatus.STARTED:
+      return { startedAt: now };
+    case MissionStatus.DELIVERED:
+    case MissionStatus.FAILED:
+      return { completedAt: now };
+    case MissionStatus.PLANNED:
+      return {};
   }
 };
 

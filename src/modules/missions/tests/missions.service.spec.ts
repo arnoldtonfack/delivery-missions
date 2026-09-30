@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -14,6 +15,7 @@ import { MissionsService } from '../missions.service';
 const DISPATCHER_ID = '0b7a3c52-1f7e-4d0a-9a51-6c1d2e3f4a50';
 const DRIVER_ID = '6f1c2b1e-8a7d-4f55-9d0f-0c5b1f0a1e11';
 const MISSION_ID = 'a3d9e2f1-5b6c-4d7e-8f90-1a2b3c4d5e6f';
+const OTHER_DRIVER = '2c4e6a8b-1d3f-4a5b-9c7d-0e1f2a3b4c5d';
 
 const missionRow = (
   overrides: Partial<Record<string, unknown>> = {},
@@ -55,8 +57,11 @@ describe('MissionsService', () => {
       findFirst: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
     };
+    missionStatusHistory: { create: jest.Mock };
     $transaction: jest.Mock;
   };
   let drivers: { lockDriver: jest.Mock };
@@ -74,6 +79,8 @@ describe('MissionsService', () => {
         findMany: jest.fn().mockResolvedValue([missionRow()]),
         findUnique: jest.fn().mockResolvedValue(missionRow()),
         update: jest.fn().mockResolvedValue(missionRow()),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(missionRow()),
         findFirst: jest.fn().mockResolvedValue(
           missionRow({
             statusHistory: [
@@ -89,6 +96,7 @@ describe('MissionsService', () => {
           }),
         ),
       },
+      missionStatusHistory: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(
@@ -387,6 +395,101 @@ describe('MissionsService', () => {
           createdAt: new Date('2026-09-30T08:00:00Z'),
         },
       ]);
+    });
+  });
+
+  describe('start', () => {
+    const expectNothingWritten = (): void => {
+      expect(prisma.mission.updateMany).not.toHaveBeenCalled();
+      expect(prisma.missionStatusHistory.create).not.toHaveBeenCalled();
+    };
+
+    beforeEach(() => {
+      prisma.mission.findFirst.mockResolvedValue({
+        status: 'PLANNED',
+        version: 3,
+      });
+      prisma.mission.findUniqueOrThrow.mockResolvedValue(
+        missionRow({ status: 'STARTED' }),
+      );
+    });
+
+    it('assigned driver: PLANNED → STARTED, write conditioned on the version and status read, history in the same transaction', async () => {
+      const result = await service.start(MISSION_ID, driver);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.mission.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: MISSION_ID, driverId: DRIVER_ID },
+        }),
+      );
+      const update = prisma.mission.updateMany.mock.calls[0][0] as {
+        where: unknown;
+        data: { startedAt: Date };
+      };
+      expect(update.where).toEqual({
+        id: MISSION_ID,
+        version: 3,
+        status: 'PLANNED',
+      });
+      expect(update.data).toEqual({
+        status: 'STARTED',
+        version: { increment: 1 },
+        startedAt: expect.any(Date) as unknown,
+      });
+      // Même horodatage serveur pour le statut et l'historique.
+      expect(prisma.missionStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          missionId: MISSION_ID,
+          fromStatus: 'PLANNED',
+          toStatus: 'STARTED',
+          actorId: DRIVER_ID,
+          createdAt: update.data.startedAt,
+        },
+      });
+      expect(result).toMatchObject({ id: MISSION_ID, status: 'STARTED' });
+    });
+
+    it('→ 403 INSUFFICIENT_ROLE for a DISPATCHER, without touching the database', async () => {
+      await expect(service.start(MISSION_ID, dispatcher)).rejects.toThrow(
+        new ForbiddenException('INSUFFICIENT_ROLE'),
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("→ 404 MISSION_NOT_FOUND for another driver's mission (existence not revealed)", async () => {
+      prisma.mission.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.start(MISSION_ID, { id: OTHER_DRIVER, role: Role.DRIVER }),
+      ).rejects.toThrow(new NotFoundException('MISSION_NOT_FOUND'));
+      expect(prisma.mission.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: MISSION_ID, driverId: OTHER_DRIVER },
+        }),
+      );
+      expectNothingWritten();
+    });
+
+    it.each(['STARTED', 'DELIVERED', 'FAILED'])(
+      '→ 409 INVALID_STATUS_TRANSITION from %s, without writing',
+      async (status) => {
+        prisma.mission.findFirst.mockResolvedValue({ status, version: 3 });
+
+        await expect(service.start(MISSION_ID, driver)).rejects.toThrow(
+          new ConflictException('INVALID_STATUS_TRANSITION'),
+        );
+        expectNothingWritten();
+      },
+    );
+
+    it('→ 409 MISSION_CONFLICT when another request wrote in between (0 row updated), without history', async () => {
+      prisma.mission.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.start(MISSION_ID, driver)).rejects.toThrow(
+        new ConflictException('MISSION_CONFLICT'),
+      );
+      expect(prisma.missionStatusHistory.create).not.toHaveBeenCalled();
     });
   });
 });

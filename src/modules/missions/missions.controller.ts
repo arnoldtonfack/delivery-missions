@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
@@ -162,5 +163,45 @@ export class MissionsController {
     @Body() dto: UpdateMissionDto,
   ): Promise<MissionResponseDto> {
     return this.missionsService.update(id, dto);
+  }
+
+  @Post(':id/start')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.DRIVER)
+  @ApiOperation({
+    summary: 'Démarrer une mission (PLANNED → STARTED)',
+    description:
+      'Réservé au chauffeur ASSIGNÉ : un dispatcher reçoit 403, un autre chauffeur ' +
+      '404. Seule une mission PLANNED peut démarrer (sinon 409 ' +
+      'INVALID_STATUS_TRANSITION). `startedAt` est l’horodatage serveur ; le ' +
+      'changement est historisé (de → vers, qui, quand) dans la même transaction. ' +
+      'Deux démarrages simultanés : un seul passe, l’autre reçoit 409.',
+  })
+  @ApiDataResponse(MissionResponseDto)
+  @ApiBadRequestResponse(
+    badRequestResponse(
+      'Identifiant invalide',
+      'Validation failed (uuid is expected)',
+    ),
+  )
+  @ApiForbiddenResponse(forbiddenResponse('Réservé au rôle DRIVER'))
+  @ApiNotFoundResponse(
+    notFoundResponse(
+      'Mission introuvable ou assignée à un autre chauffeur',
+      'MISSION_NOT_FOUND',
+    ),
+  )
+  @ApiConflictResponse(
+    conflictResponse(
+      'Mission pas PLANNED (INVALID_STATUS_TRANSITION) ou modifiée en même temps ' +
+        '(MISSION_CONFLICT)',
+      'INVALID_STATUS_TRANSITION',
+    ),
+  )
+  start(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: IAuthenticatedUser,
+  ): Promise<MissionResponseDto> {
+    return this.missionsService.start(id, user);
   }
 }
