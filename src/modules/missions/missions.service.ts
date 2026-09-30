@@ -162,7 +162,8 @@ export class MissionsService {
         ...visibleBy(viewer),
       },
       select: MISSION_RESPONSE_SELECT,
-      orderBy: [{ createdAt: 'asc' }, { reference: 'asc' }],
+      // Plus récente d'abord : une mission tout juste créée apparaît en tête.
+      orderBy: [{ createdAt: 'desc' }, { reference: 'asc' }],
     });
     return missions.map(toMissionResponse);
   }
